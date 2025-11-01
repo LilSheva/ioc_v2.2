@@ -109,6 +109,8 @@ class ConfigManager:
             "nta_status": "",
             "siem_tools_status": "---------------",
             "siem_status": "",
+            "file_blacklist": ["тематикой"],
+            "filename_exclusions": ["1.docx"],
             "mp10_templates": [
                 "object.name CONTAINS \"{ioc}\"",
                 "object.path CONTAINS \"{ioc}\"",

@@ -18,20 +18,33 @@ class IOCParser:
     def __init__(self, ioc_config: List[Dict[str, Any]]):
         """Инициализация парсера."""
         self.ioc_config = ioc_config
+        self.file_blacklist = []
+        self.filename_exclusions = []
+        # Находим конфиг для File и загружаем из него список исключений
+        for ioc in self.ioc_config:
+            if ioc['name'] == 'File':
+                self.file_blacklist = ioc.get('file_blacklist', [])
+                self.filename_exclusions = ioc.get('filename_exclusions', [])
+                break
 
     def extract_text_from_docx(self, file_path: str) -> str:
         """Извлекает весь текст из .docx файла (параграфы и таблицы)."""
         try:
             doc = Document(file_path)
             text_parts = []
+            
+            # Извлечение текста из параграфов
             for paragraph in doc.paragraphs:
                 if paragraph.text.strip():
                     text_parts.append(paragraph.text)
+            
+            # Извлечение текста из таблиц
             for table in doc.tables:
                 for row in table.rows:
                     for cell in row.cells:
                         if cell.text.strip():
                             text_parts.append(cell.text)
+            
             return '\n'.join(text_parts)
         except Exception as e:
             raise Exception(f"Ошибка при чтении файла {file_path}: {str(e)}")
@@ -69,15 +82,37 @@ class IOCParser:
 
     def find_all_raw_matches(self, text: str) -> Dict[str, List[Tuple[str, str]]]:
         """
-        Финальная логика извлечения IOC по порядку с удалением из текста.
+        ФИНАЛЬНАЯ ВЕРСЯ: Логика извлечения с правильным порядком.
+        Сначала извлекаются хэши, чтобы их не повредила склейка URI.
         """
         raw_matches = {}
-        
-        # ШАГ 1: Предварительная "склейка" URI, разорванных переносом строки.
-        stitching_pattern = re.compile(r'([a-zA-Z0-9/\]:.)])\s*\n\s*(?=[a-zA-Z0-9/\[(])')
-        working_text = stitching_pattern.sub(r'\1', text)
+        working_text = text
 
-        # ШАГ 2: Извлечение полных URI с помощью одного regex.
+        # ШАГ 1 (НОВЫЙ ПОРЯДОК): Hashes - ищем и удаляем в самом начале
+        hash_order = ['SHA256', 'SHA1', 'MD5']
+        found_hash_strings = set()
+        for hash_name in hash_order:
+            for ioc in self.ioc_config:
+                if ioc['name'] == hash_name and ioc.get('enabled', False):
+                    matches = re.findall(ioc['regex'], working_text)
+                    hash_pairs = []
+                    for match in set(matches):
+                        if not any(match in found for found in found_hash_strings):
+                            hash_pairs.append((match, self.clean_ioc(match, hash_name)))
+                            found_hash_strings.add(match)
+                            # Заменяем на пробелы, чтобы не ломать индексы
+                            working_text = working_text.replace(match, ' ' * len(match))
+                    if hash_name not in raw_matches:
+                        raw_matches[hash_name] = []
+                    raw_matches[hash_name].extend(hash_pairs)
+                    break
+
+        # ШАГ 2: Предварительная "склейка" URI, разорванных переносом строки.
+        # Теперь она работает на тексте, из которого уже удалены хэши, и не может их повредить.
+        stitching_pattern = re.compile(r'([a-zA-Z0-9/\]:.)])\s*\n\s*(?=[a-zA-Z0-9/\[(])')
+        working_text = stitching_pattern.sub(r'\1', working_text)
+
+        # ШАГ 3: Извлечение полных URI с помощью одного regex.
         uri_pairs = []
         uri_pattern = re.compile(r'\b[a-zA-Z0-9][^\s<>"]*?\[:\]//(?:[^.,;\s<>\[\]]|[\[].{1,2}[\]])+')
         
@@ -92,75 +127,73 @@ class IOCParser:
             
         raw_matches['URI'] = sorted(uri_pairs, key=lambda x: x[0])
 
-        # --- Далее следует ВАША ОРИГИНАЛЬНАЯ ЛОГИКА С УЛУЧШЕННЫМИ REGEX ---
+        # --- Далее следует остальная логика, как и раньше ---
         
-        # ШАГ 3: IP - ищем и удаляем
+        # ШАГ 4: IP - ищем и удаляем
         ip_pairs = []
         for ioc in self.ioc_config:
             if ioc['name'] == 'IP' and ioc.get('enabled', False):
                 matches = re.findall(ioc['regex'], working_text)
                 for match in set(matches):
                     ip_pairs.append((match, self.clean_ioc(match, 'IP')))
-                    working_text = working_text.replace(match, '', 1)
+                    working_text = working_text.replace(match, ' ' * len(match))
                 break
         raw_matches['IP'] = ip_pairs
 
-        # ШАГ 4: Email - ищем и удаляем (ВАЖНО: ПЕРЕД DNS)
+        # ШАГ 5: Email - ищем и удаляем
         email_pairs = []
         for ioc in self.ioc_config:
             if ioc['name'] == 'Email' and ioc.get('enabled', False):
-                # УЛУЧШЕННЫЙ REGEX: ищет email сразу с обфускацией `[.]`
                 email_regex = r'\b[a-zA-Z0-9._%+-]+@(?:[a-zA-Z0-9-]+\.)*[a-zA-Z0-9-]+\[\.\][a-zA-Z]{2,}\b'
                 matches = re.findall(email_regex, working_text)
                 for match in set(matches):
                     email_pairs.append((match, self.clean_ioc(match, 'Email')))
-                    working_text = working_text.replace(match, '', 1)
+                    working_text = working_text.replace(match, ' ' * len(match))
                 break
         raw_matches['Email'] = email_pairs
 
-        # ШАГ 5: Files - ищем в угловых скобках «»
+        # ШАГ 6: Files - финальная логика с проверкой контекста, расширения и имени файла
         file_pairs = []
-        file_matches = re.findall(r'«([^»]+)»', working_text)
-        for match in set(file_matches):
-            working_text = working_text.replace(f'«{match}»', '', 1)
-            # Ваша оригинальная, правильная логика валидации
-            if ('.' in match and
-                len(match.split('.')[0].strip()) > 0 and
-                len(match.split('.')[-1].strip()) >= 1):
-                cleaned = self.clean_ioc(match, 'File')
-                file_pairs.append((match, cleaned))
+        # Ищем все вхождения «...» и их позицию в тексте
+        for match_obj in re.finditer(r'«([^»]+)»', working_text):
+            filename = match_obj.group(1) # Текст внутри кавычек
+            
+            # 1. Проверка на слова-исключения ПЕРЕД файлом
+            start_pos = match_obj.start()
+            text_before = working_text[max(0, start_pos - 20):start_pos].lower().rstrip()
+            
+            if any(text_before.endswith(word) for word in self.file_blacklist):
+                continue
+
+            # 2. НОВАЯ ПРОВЕРКА: Проверка на точное совпадение имени файла со списком исключений
+            # .strip() нужен на случай, если в имени файла есть лишние пробелы
+            if filename.strip() in self.filename_exclusions:
+                continue
+
+            # 3. Строгая проверка на валидность имени файла
+            parts = filename.rsplit('.', 1)
+            if len(parts) == 2 and parts[0].strip() and re.match(r'^[a-zA-Z]+$', parts[1].strip()):
+                cleaned = self.clean_ioc(filename, 'File')
+                file_pairs.append((filename, cleaned))
+        
+        # Удаляем все найденные валидные файлы из текста за один проход
+        for original, _ in file_pairs:
+            working_text = working_text.replace(f'«{original}»', ' ' * (len(original) + 2))
+
         raw_matches['File'] = file_pairs
 
-        # ШАГ 6: DNS - в оставшемся тексте
+        # ШАГ 7: DNS - в оставшемся тексте
         dns_pairs = []
         for ioc in self.ioc_config:
             if ioc['name'] == 'DNS' and ioc.get('enabled', False):
-                # УЛУЧШЕННЫЙ REGEX: более строгий, не захватывает "спискам:"
-                dns_regex = r'\b(?:[a-zA-Z0-9-]+\.)*(?:[a-zA-Z0-9-]+\[\.\][a-zA-Z]{2,})\b'
+                dns_regex = r'\b[a-zA-Z0-9-]+(?:\[\.\][a-zA-Z0-9-]+)+\b'
                 matches = re.findall(dns_regex, working_text)
                 for match in set(matches):
-                    dns_pairs.append((match, self.clean_ioc(match, 'DNS')))
-                    working_text = working_text.replace(match, '', 1)
+                    if '@' not in match:
+                        dns_pairs.append((match, self.clean_ioc(match, 'DNS')))
+                        working_text = working_text.replace(match, ' ' * len(match))
                 break
         raw_matches['DNS'] = dns_pairs
-
-        # ШАГ 7: Hashes - в правильном порядке
-        hash_order = ['SHA256', 'SHA1', 'MD5']
-        found_hash_strings = set()
-        for hash_name in hash_order:
-            for ioc in self.ioc_config:
-                if ioc['name'] == hash_name and ioc.get('enabled', False):
-                    matches = re.findall(ioc['regex'], working_text)
-                    hash_pairs = []
-                    for match in set(matches):
-                        if not any(match in found for found in found_hash_strings):
-                            hash_pairs.append((match, self.clean_ioc(match, hash_name)))
-                            found_hash_strings.add(match)
-                            working_text = working_text.replace(match, '', 1)
-                    if hash_name not in raw_matches:
-                        raw_matches[hash_name] = []
-                    raw_matches[hash_name].extend(hash_pairs)
-                    break
 
         return raw_matches
 
