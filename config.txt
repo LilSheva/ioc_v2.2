@@ -1,0 +1,144 @@
+[
+    {
+        "enabled": true,
+        "name": "IP",
+        "regex": "(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(?:\\[\\.\\]|\\.)){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)",
+        "report_type": "IP-адрес",
+        "nta_status": "",
+        "siem_tools_status": "---------------",
+        "siem_status": "",
+        "mp10_templates": [
+            "src.ip = \"{ioc}\"",
+            "dst.ip = \"{ioc}\""
+        ],
+        "nad_templates": [
+            "src.ip == \"{ioc}\"",
+            "dst.ip == \"{ioc}\"",
+            "host.ip == \"{ioc}\""
+        ]
+    },
+    {
+        "enabled": true,
+        "name": "DNS",
+        "regex": "(?:[a-zA-Z0-9](?:[a-zA-Z0-9\\-]{0,61}[a-zA-Z0-9])?(?:\\[\\.\\]|\\.)){1,}[a-zA-Z]{2,}",
+        "report_type": "Домен",
+        "nta_status": "",
+        "siem_tools_status": "---------------",
+        "siem_status": "---------------",
+        "mp10_templates": [
+            "event_src.fqdn = \"{ioc}\"",
+            "object.fullpath = \"{ioc}\"",
+            "object.name = \"{ioc}\"",
+            "subject.account.domain = \"{ioc}\""
+        ],
+        "nad_templates": [
+            "src.dns ~ \"{ioc}\"",
+            "dst.dns ~ \"{ioc}\"",
+            "http.rqs.url ~ \"{ioc}\"",
+            "dns.query.rrname ~ \"{ioc}\""
+        ]
+    },
+    {
+        "enabled": true,
+        "name": "URI",
+        "regex": "(?:\\[:\\]|:)//[^\\s<>\\\"]+",
+        "report_type": "URI",
+        "nta_status": "",
+        "siem_tools_status": "---------------",
+        "siem_status": "---------------",
+        "mp10_templates": [],
+        "nad_templates": []
+    },
+    {
+        "enabled": true,
+        "name": "File",
+        "regex": "(?:\\«)([^\\«\\»]+?)(?:\\»)",
+        "report_type": "File",
+        "nta_status": "",
+        "siem_tools_status": "---------------",
+        "siem_status": "",
+        "file_blacklist": [
+            "тематикой",
+            "домена"
+        ],
+        "filename_exclusions": [
+            "1.docx"
+        ],
+        "mp10_templates": [
+            "object.name CONTAINS \"{ioc}\"",
+            "object.path CONTAINS \"{ioc}\"",
+            "object.fullpath = \"{ioc}\""
+        ],
+        "nad_templates": [
+            "files.filename ~ \"{ioc}\"",
+            "files.mime ~ \"{ioc}\""
+        ]
+    },
+    {
+        "enabled": true,
+        "name": "Email",
+        "regex": "\\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}\\b",
+        "report_type": "Email",
+        "nta_status": "",
+        "siem_tools_status": "---------------",
+        "siem_status": "",
+        "mp10_templates": [
+            "subject.account.contact CONTAINS \"{ioc}\"",
+            "object.fullpath = \"{ioc}\""
+        ],
+        "nad_templates": [
+            "mail.from == \"{ioc}\"",
+            "mail.recipient == \"{ioc}\""
+        ]
+    },
+    {
+        "enabled": true,
+        "name": "SHA256",
+        "regex": "\\b[a-fA-F0-9]{64}\\b",
+        "report_type": "SHA256",
+        "nta_status": "---------------",
+        "siem_tools_status": "---------------",
+        "siem_status": "",
+        "mp10_templates": [
+            "object.hash.sha256 = \"{ioc}\""
+        ],
+        "nad_templates": []
+    },
+    {
+        "enabled": true,
+        "name": "MD5",
+        "regex": "\\b[a-fA-F0-9]{32}\\b",
+        "report_type": "MD5",
+        "nta_status": "",
+        "siem_tools_status": "---------------",
+        "siem_status": "",
+        "mp10_templates": [
+            "object.hash.md5 = \"{ioc}\""
+        ],
+        "nad_templates": []
+    },
+    {
+        "enabled": true,
+        "name": "SHA1",
+        "regex": "\\b[a-fA-F0-9]{40}\\b",
+        "report_type": "SHA1",
+        "nta_status": "---------------",
+        "siem_tools_status": "---------------",
+        "siem_status": "",
+        "mp10_templates": [
+            "object.hash.sha1 = \"{ioc}\""
+        ],
+        "nad_templates": []
+    },
+    {
+        "enabled": true,
+        "name": "Registry",
+        "regex": "(?:HKEY_[A-Z_]+|HKLM|HKCU|HKCR|HKU|HKCC)(?:\\\\[^\\s\\\\]+)+?(?=[\\s,;.!?)\\]'\\\"`]|$)",
+        "report_type": "Registry",
+        "nta_status": "",
+        "siem_tools_status": "---------------",
+        "siem_status": "",
+        "mp10_templates": [],
+        "nad_templates": []
+    }
+]

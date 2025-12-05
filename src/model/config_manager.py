@@ -39,22 +39,22 @@ class ConfigManager:
             "siem_tools_status": "---------------",
             "siem_status": "---------------",
             "mp10_templates": [
-                "event_src.fqdn = \"{ioc}.\"",
-                "object.fullpath = \"{ioc}.\"",
-                "object.name = \"{ioc}.\"",
-                "subject.account.domain = \"{ioc}.\""
+                "event_src.fqdn = \"{ioc}\"",
+                "object.fullpath = \"{ioc}\"",
+                "object.name = \"{ioc}\"",
+                "subject.account.domain = \"{ioc}\""
             ],
             "nad_templates": [
-                "src.dns ~ \"{ioc}.\"",
-                "dst.dns ~ \"{ioc}.\"",
-                "http.rqs.url ~ \"{ioc}.\"",
-                "dns.query.rrname ~ \"{ioc}.\""
+                "src.dns ~ \"{ioc}\"",
+                "dst.dns ~ \"{ioc}\"",
+                "http.rqs.url ~ \"{ioc}\"",
+                "dns.query.rrname ~ \"{ioc}\""
             ]
         },
         {
             "enabled": True,
             "name": "URI",
-            "regex": r"(?:https?|hxxps?|ftps?|mtls?)(?:\[:\]|:)//[^\s<>\"]+",
+            "regex": r"(?:\[:\]|:)//[^\s<>\"]+",
             "report_type": "URI",
             "nta_status": "",
             "siem_tools_status": "---------------",
@@ -64,53 +64,19 @@ class ConfigManager:
         },
         {
             "enabled": True,
-            "name": "SHA256",
-            "regex": r"\b[a-fA-F0-9]{64}\b",
-            "report_type": "SHA256",
-            "nta_status": "---------------",
-            "siem_tools_status": "---------------",
-            "siem_status": "",
-            "mp10_templates": [
-                "object.hash.sha256 = \"{ioc}\""
-            ],
-            "nad_templates": []
-        },
-        {
-            "enabled": True,
-            "name": "SHA1",
-            "regex": r"\b[a-fA-F0-9]{40}\b",
-            "report_type": "SHA1",
-            "nta_status": "---------------",
-            "siem_tools_status": "---------------",
-            "siem_status": "",
-            "mp10_templates": [
-                "object.hash.sha1 = \"{ioc}\""
-            ],
-            "nad_templates": []
-        },
-        {
-            "enabled": True,
-            "name": "MD5",
-            "regex": r"\b[a-fA-F0-9]{32}\b",
-            "report_type": "MD5",
-            "nta_status": "",
-            "siem_tools_status": "---------------",
-            "siem_status": "",
-            "mp10_templates": [
-                "object.hash.md5 = \"{ioc}\""
-            ],
-            "nad_templates": []
-        },
-        {
-            "enabled": True,
             "name": "File",
-            "regex": r'(?:\"|\«|файл с наименованием \")([^\"\«\»]+?)(?:\"|\»)',
+            "regex": r"(?:\«)([^\«\»]+?)(?:\»)",
             "report_type": "File",
             "nta_status": "",
             "siem_tools_status": "---------------",
             "siem_status": "",
-            "file_blacklist": ["тематикой"],
-            "filename_exclusions": ["1.docx"],
+            "file_blacklist": [
+                "тематикой",
+                "домена"
+            ],
+            "filename_exclusions": [
+                "1.docx"
+            ],
             "mp10_templates": [
                 "object.name CONTAINS \"{ioc}\"",
                 "object.path CONTAINS \"{ioc}\"",
@@ -129,7 +95,52 @@ class ConfigManager:
             "nta_status": "",
             "siem_tools_status": "---------------",
             "siem_status": "",
-            "mp10_templates": [],
+            "mp10_templates": [
+                "subject.account.contact CONTAINS \"{ioc}\"",
+                "object.fullpath = \"{ioc}\""
+            ],
+            "nad_templates": [
+                "mail.from == \"{ioc}\"",
+                "mail.recipient == \"{ioc}\""
+            ]
+        },
+        {
+            "enabled": True,
+            "name": "SHA256",
+            "regex": r"\b[a-fA-F0-9]{64}\b",
+            "report_type": "SHA256",
+            "nta_status": "---------------",
+            "siem_tools_status": "---------------",
+            "siem_status": "",
+            "mp10_templates": [
+                "object.hash.sha256 = \"{ioc}\""
+            ],
+            "nad_templates": []
+        },
+        {
+            "enabled": True,
+            "name": "MD5",
+            "regex": r"\b[a-fA-F0-9]{32}\b",
+            "report_type": "MD5",
+            "nta_status": "",
+            "siem_tools_status": "---------------",
+            "siem_status": "",
+            "mp10_templates": [
+                "object.hash.md5 = \"{ioc}\""
+            ],
+            "nad_templates": []
+        },
+        {
+            "enabled": True,
+            "name": "SHA1",
+            "regex": r"\b[a-fA-F0-9]{40}\b",
+            "report_type": "SHA1",
+            "nta_status": "---------------",
+            "siem_tools_status": "---------------",
+            "siem_status": "",
+            "mp10_templates": [
+                "object.hash.sha1 = \"{ioc}\""
+            ],
             "nad_templates": []
         },
         {

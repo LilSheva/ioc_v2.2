@@ -24,7 +24,6 @@ def main():
         # Импорты после настройки консоли
         from src.controller.app_controller import AppController
         from src.view.main_view import MainView
-        
         # Создание контроллера
         controller = AppController(config_path="config.txt")
         

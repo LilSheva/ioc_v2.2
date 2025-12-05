@@ -1,7 +1,4 @@
-"""
-Контроллер приложения V2.
-Координирует взаимодействие между моделью и представлением.
-"""
+"""Контроллер приложения для координации между моделью и представлением."""
 
 import os
 from typing import List, Optional, Tuple
@@ -11,15 +8,18 @@ from ..model.report_generator import ReportGenerator
 
 
 class AppController:
-    """Главный контроллер приложения V2."""
-    
+    """Главный контроллер приложения."""
+
     def __init__(self, config_path: str = "config.txt"):
         """Инициализация контроллера."""
         self.config_manager = ConfigManager(config_path)
         self.selected_files: List[str] = []
         self.last_ioc_data = None
         self.last_query_data = None
-        self.bulletin = ""  # Новое поле для бюллетеня
+        self.bulletin = ""
+        self.mode = "fstek"
+        self.uri_clean_mode = "domain"
+        self.event_type = "Фишинговая рассылка электронной почты. Вредоносные вложения"
     
     def get_config_data(self):
         """Возвращает текущую конфигурацию."""
@@ -55,7 +55,111 @@ class AppController:
     def get_bulletin(self) -> str:
         """Возвращает текущее значение бюллетеня."""
         return self.bulletin
-    
+
+    def set_mode(self, mode: str) -> None:
+        """Устанавливает режим работы (fstek/gossopka)."""
+        self.mode = mode
+
+    def get_mode(self) -> str:
+        """Возвращает текущий режим работы."""
+        return self.mode
+
+    def set_uri_clean_mode(self, mode: str) -> None:
+        """Устанавливает режим очистки URI (unique/domain)."""
+        self.uri_clean_mode = mode
+
+    def get_uri_clean_mode(self) -> str:
+        """Возвращает текущий режим очистки URI."""
+        return self.uri_clean_mode
+
+    def set_event_type(self, event_type: str) -> None:
+        """Устанавливает тип события."""
+        self.event_type = event_type
+
+    def get_event_type(self) -> str:
+        """Возвращает текущий тип события."""
+        return self.event_type
+
+    def extract_bulletin_from_filename(self, filename: str) -> Optional[str]:
+        """Извлекает номер бюллетеня из имени файла (формат: XXX XX XXXX)."""
+        import re
+        pattern = r'\b(\d+)\s+(\d+)\s+(\d+)\b'
+        match = re.search(pattern, filename)
+
+        if match:
+            return f"{match.group(1)}/{match.group(2)}/{match.group(3)}"
+
+        return None
+
+    def auto_fill_bulletin(self) -> Optional[str]:
+        """Автоматически определяет номер бюллетеня из имен файлов."""
+        if not self.selected_files:
+            return None
+
+        bulletin_numbers = set()
+
+        for file_path in self.selected_files:
+            filename = os.path.basename(file_path)
+            bulletin_num = self.extract_bulletin_from_filename(filename)
+
+            if bulletin_num:
+                bulletin_numbers.add(bulletin_num)
+
+        if len(bulletin_numbers) == 1:
+            return f"FSTEC {bulletin_numbers.pop()}"
+
+        return None
+
+    def extract_gossopka_info_from_filename(self, filename: str) -> Optional[dict]:
+        """Извлекает информацию из имени файла ГосСОПКА (дата, номер, организация)."""
+        import re
+        pattern = r'Бюллетень\s+от\s+(\d{2}\.\d{2}\.\d{4})_(\d+)\s+(.+?)\.docx'
+        match = re.search(pattern, filename, re.IGNORECASE)
+
+        if match:
+            return {
+                "date": match.group(1),
+                "number": match.group(2),
+                "org": match.group(3).strip()
+            }
+
+        return None
+
+    def generate_filters_filename(self) -> str:
+        """Генерирует имя файла фильтров в зависимости от режима."""
+        from datetime import datetime
+        current_time = datetime.now().strftime('%d.%m.%Y %H-%M')
+
+        if self.mode == "fstek":
+            bulletin = self.bulletin or self.auto_fill_bulletin() or "Без бюллетеня"
+            bulletin = bulletin.replace('/', '-')
+            return f"Фильтры ({bulletin}) {current_time}.xlsx"
+
+        else:
+            info_list = []
+            for file_path in self.selected_files:
+                filename = os.path.basename(file_path)
+                info = self.extract_gossopka_info_from_filename(filename)
+                if info:
+                    info_list.append(info)
+
+            if not info_list:
+                return f"Фильтры (ГосСОПКА) {current_time}.xlsx"
+
+            groups = {}
+            for info in info_list:
+                key = (info["org"], info["date"])
+                if key not in groups:
+                    groups[key] = []
+                groups[key].append(info["number"])
+
+            if groups:
+                (org, date), numbers = list(groups.items())[0]
+                numbers_str = ",".join(sorted(numbers))
+                return f"Фильтры ({org} от {date} ({numbers_str})) {current_time}.xlsx"
+
+            return f"Фильтры (ГосСОПКА) {current_time}.xlsx"
+
     def validate_files(self) -> Tuple[bool, str]:
         """Валидация выбранных файлов."""
         if not self.selected_files:
@@ -91,11 +195,11 @@ class AppController:
             log("🔍 Начало обработки файлов...")
             log(f"📂 Файлов для обработки: {len(self.selected_files)}")
             
-            # Создаем парсер с текущей конфигурацией
+            # Создаем парсер с текущей конфигурацией и режимом
             enabled_iocs = self.config_manager.get_enabled_iocs()
             log(f"✅ Включенных типов IOC: {len(enabled_iocs)}")
-            
-            parser = IOCParser(enabled_iocs)
+
+            parser = IOCParser(enabled_iocs, mode=self.mode)
             
             # Извлекаем IOC
             log("\n📖 Чтение документов...")
@@ -141,13 +245,18 @@ class AppController:
             
             log("\n📝 Генерация отчетов...")
             
-            # Создаем генератор отчетов
+            # Создаем генератор отчетов с параметрами
             all_iocs = self.config_manager.get_enabled_iocs()
-            generator = ReportGenerator(all_iocs)
-            
+            generator = ReportGenerator(all_iocs, uri_clean_mode=self.uri_clean_mode)
+
             # Генерируем .xlsx отчет
             log("   • Создание .xlsx отчета (10 столбцов)...")
-            xlsx_success = generator.generate_xlsx_report(ioc_data, output_xlsx_path, self.bulletin)
+            xlsx_success = generator.generate_xlsx_report(
+                ioc_data, output_xlsx_path,
+                bulletin=self.bulletin,
+                mode=self.mode,
+                event_type=self.event_type
+            )
             
             if not xlsx_success:
                 log("❌ Ошибка при создании .xlsx отчета.")
@@ -186,3 +295,41 @@ class AppController:
     def move_ioc_priority(self, index: int, direction: int) -> bool:
         """Изменяет приоритет IOC."""
         return self.config_manager.move_ioc(index, direction)
+
+    def generate_filters_file(self, ioc_data: dict, template_path: str,
+                             output_path: str, log_callback=None) -> bool:
+        """
+        Генерирует файл "Фильтры.xlsx" на основе шаблона.
+
+        Args:
+            ioc_data: Данные IOC
+            template_path: Путь к шаблону
+            output_path: Путь для сохранения
+            log_callback: Функция для логирования
+
+        Returns:
+            True если успешно, False при ошибке
+        """
+        def log(message):
+            if log_callback:
+                log_callback(message)
+
+        try:
+            log("📋 Генерация файла фильтров...")
+
+            # Создаем генератор с текущими параметрами
+            all_iocs = self.config_manager.get_enabled_iocs()
+            generator = ReportGenerator(all_iocs, uri_clean_mode=self.uri_clean_mode)
+
+            # Генерируем файл фильтров
+            success = generator.generate_filters_xlsx(ioc_data, template_path, output_path, log_callback=log_callback)
+
+            if success:
+                return True
+            else:
+                log("❌ Ошибка при создании файла фильтров.")
+                return False
+
+        except Exception as e:
+            log(f"❌ Ошибка при генерации фильтров: {str(e)}")
+            return False
