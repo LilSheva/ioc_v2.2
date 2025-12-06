@@ -9,6 +9,8 @@ import os
 
 def setup_console_mode():
     """Настройка режима консоли для избежания ошибок при запуске .exe файла."""
+
+
     if sys.stdout is None:
         sys.stdout = open(os.devnull, 'w')
     if sys.stderr is None:

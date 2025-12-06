@@ -5,6 +5,7 @@ from typing import List, Optional, Tuple
 from ..model.config_manager import ConfigManager
 from ..model.ioc_parser_v21_fixed import IOCParser
 from ..model.report_generator import ReportGenerator
+from ..utils import get_default_filters_template_path
 
 
 class AppController:
@@ -20,6 +21,11 @@ class AppController:
         self.mode = "fstek"
         self.uri_clean_mode = "domain"
         self.event_type = "Фишинговая рассылка электронной почты. Вредоносные вложения"
+
+        # Путь к файлу-референсу для фильтров
+        # По умолчанию пытаемся найти в tst/
+        default_template = get_default_filters_template_path()
+        self.filters_template_path = default_template if os.path.exists(default_template) else None
     
     def get_config_data(self):
         """Возвращает текущую конфигурацию."""
@@ -79,6 +85,36 @@ class AppController:
     def get_event_type(self) -> str:
         """Возвращает текущий тип события."""
         return self.event_type
+
+    def set_filters_template_path(self, path: Optional[str]) -> None:
+        """
+        Устанавливает путь к файлу-референсу для фильтров.
+
+        Args:
+            path: Путь к .xlsx файлу-шаблону или None
+        """
+        if path and os.path.exists(path):
+            self.filters_template_path = path
+        else:
+            self.filters_template_path = None
+
+    def get_filters_template_path(self) -> Optional[str]:
+        """
+        Возвращает путь к файлу-референсу для фильтров.
+
+        Returns:
+            Путь к файлу или None если не установлен
+        """
+        return self.filters_template_path
+
+    def has_filters_template(self) -> bool:
+        """
+        Проверяет наличие файла-референса для фильтров.
+
+        Returns:
+            True если файл установлен и существует
+        """
+        return self.filters_template_path is not None and os.path.exists(self.filters_template_path)
 
     def extract_bulletin_from_filename(self, filename: str) -> Optional[str]:
         """Извлекает номер бюллетеня из имени файла (формат: XXX XX XXXX)."""

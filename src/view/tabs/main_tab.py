@@ -65,8 +65,27 @@ class MainTab:
             command=self._clear_files,
             bootstyle=SECONDARY
         )
-        self.clear_files_btn.pack(side=LEFT, padx=(0, 5))
-        
+        self.clear_files_btn.pack(side=LEFT, padx=(0, 10))
+
+        # Статус фильтров (в той же строке)
+        self.filters_status_label = ttk.Label(
+            btn_frame,
+            text="",
+            font=('Segoe UI', 8),
+            foreground='white',
+            wraplength=250
+        )
+        self.filters_status_label.pack(side=LEFT, padx=(0, 5))
+
+        # Кнопка выбора файла-референса (в той же строке)
+        self.filters_btn = ttk.Button(
+            btn_frame,
+            text="🔄 Указать файл-референс",
+            command=self._select_filters_template,
+            bootstyle=DANGER
+        )
+        self.filters_btn.pack(side=LEFT)
+
         # Секция "Параметры отчета"
         bulletin_frame = ttk.LabelFrame(self.frame, text="Параметры отчета", padding=10)
         bulletin_frame.pack(fill=X, pady=(0, 10))
@@ -189,6 +208,9 @@ class MainTab:
             bootstyle=SECONDARY
         )
         self.clear_log_btn.pack()
+
+        # Обновляем статус фильтров при инициализации
+        self._update_filters_status()
     
     def _add_files(self):
         """Обработчик добавления файлов."""
@@ -298,8 +320,9 @@ class MainTab:
         )
 
         filters_path = None
-        template_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../../tst/Фильтры (Переделанные).xlsx")
-        if os.path.exists(template_path):
+        # Используем путь к референсу из контроллера
+        if self.controller.has_filters_template():
+            template_path = self.controller.get_filters_template_path()
             filter_filename = self.controller.generate_filters_filename()
             filters_path = os.path.join(os.path.dirname(output_path), filter_filename)
 
@@ -375,6 +398,47 @@ class MainTab:
     def _on_uri_mode_changed(self):
         """Обработчик изменения режима очистки URI."""
         pass
+
+    def _update_filters_status(self):
+        """Обновляет статус отображения файла-референса для фильтров."""
+        has_template = self.controller.has_filters_template()
+
+        if has_template:
+            template_path = self.controller.get_filters_template_path()
+            filename = os.path.basename(template_path) if template_path else "файл"
+            self.filters_status_label.config(
+                text=f"✅ Фильтры найдены:\n{filename}"
+            )
+            self.filters_btn.config(
+                text="🔄 Поменять файл-референс",
+                bootstyle=SUCCESS
+            )
+        else:
+            self.filters_status_label.config(
+                text="❌ Фильтры не найдены.\nМожете указать где они"
+            )
+            self.filters_btn.config(
+                text="🔄 Указать файл-референс",
+                bootstyle=DANGER
+            )
+
+    def _select_filters_template(self):
+        """Обработчик выбора файла-референса для фильтров."""
+        file_path = filedialog.askopenfilename(
+            title="Выберите файл-шаблон фильтров",
+            filetypes=[("Excel Files", "*.xlsx"), ("All Files", "*.*")],
+            initialfile="Фильтры (Переделанные).xlsx"
+        )
+
+        if file_path:
+            self.controller.set_filters_template_path(file_path)
+            self._update_filters_status()
+
+            if self.controller.has_filters_template():
+                self.log(f"Файл-референс для фильтров установлен: {os.path.basename(file_path)}")
+            else:
+                self.log("Ошибка: выбранный файл не существует.")
+                messagebox.showerror("Ошибка", "Выбранный файл не существует.")
 
     def get_frame(self):
         """Возвращает фрейм вкладки."""
