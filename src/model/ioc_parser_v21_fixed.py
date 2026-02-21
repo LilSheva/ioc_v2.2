@@ -87,11 +87,16 @@ class IOCParser:
                     text_parts.append(paragraph.text)
 
             # Извлечение текста из таблиц с разделением ячеек для предотвращения склеивания IOC
+            # Дедупликация merged cells в пределах строки: горизонтально объединённые ячейки
+            # возвращают один и тот же _tc несколько раз в row.cells
             for table in doc.tables:
                 for row in table.rows:
+                    seen_tcs = set()
                     for cell in row.cells:
-                        if cell.text.strip():
+                        tc_id = id(cell._tc)
+                        if tc_id not in seen_tcs and cell.text.strip():
                             text_parts.append(cell.text.strip() + '\n')
+                            seen_tcs.add(tc_id)
 
             return '\n'.join(text_parts)
         except Exception as e:
@@ -124,6 +129,51 @@ class IOCParser:
                 cleaned = f"{protocol}{host}{path or ''}"
 
         return cleaned
+
+    def _detect_ioc_status(self, full_text: str, ioc_original: str) -> str:
+        """
+        Определяет статус IOC по контексту (только для ГосСОПКА).
+        Возвращает: "block", "search", "unblock"
+        """
+        pos = full_text.find(ioc_original)
+        if pos == -1:
+            return "block"
+
+        # Проверяем текст ПОСЛЕ IOC (до 150 символов) на "разблокировка/разблокировку"
+        after_text = full_text[pos + len(ioc_original):pos + len(ioc_original) + 150]
+        after_lines = after_text.strip().split('\n')
+        for line in after_lines[:2]:
+            if re.search(r'разблокиров', line, re.IGNORECASE):
+                return "unblock"
+
+        # Проверяем текст ПЕРЕД IOC (до 300 символов)
+        before_text = full_text[max(0, pos - 300):pos].lower()
+
+        # "(Легитимный)" — unblock
+        if 'легитимный' in before_text:
+            return "unblock"
+
+        # "для поиска и блокировки" → block
+        if 'для поиска и блокировки' in before_text:
+            return "block"
+
+        # "для поиска" (без "блокировки") → search
+        if 'для поиска' in before_text:
+            return "search"
+
+        return "block"
+
+    def extract_bdu_identifiers(self, file_paths: List[str]) -> List[Tuple[str, str]]:
+        """Извлекает BDU-идентификаторы из файлов. Возвращает [(bdu_id, filename)]."""
+        bdu_list = []
+        bdu_regex = re.compile(r'BDU:\d{4}-\d{4,6}')
+        for fp in file_paths:
+            text = self.extract_text_from_docx(fp)
+            matches = bdu_regex.findall(text)
+            fname = os.path.basename(fp)
+            for m in set(matches):
+                bdu_list.append((m, fname))
+        return sorted(set(bdu_list))
 
     def find_all_raw_matches(self, text: str) -> Dict[str, List[Tuple[str, str]]]:
         """
@@ -226,7 +276,13 @@ class IOCParser:
         dns_pairs = []
         for ioc in self.ioc_config:
             if ioc['name'] == 'DNS' and ioc.get('enabled', False):
-                dns_regex = r'\b[a-zA-Z0-9-]+(?:\[\.\][a-zA-Z0-9-]+)+\b'
+                if self.mode == "gossopka":
+                    # В ГосСОПКА поддерживаем смешанную обфускацию (. и [.])
+                    # Lookahead гарантирует наличие хотя бы одного [.]
+                    dns_regex = r'\b(?=[^\s]*\[\.\])[a-zA-Z0-9-]+(?:(?:\.|\[\.\])[a-zA-Z0-9-]+)+\b'
+                else:
+                    # В ФСТЕК только полностью обфусцированные [.]
+                    dns_regex = r'\b[a-zA-Z0-9-]+(?:\[\.\][a-zA-Z0-9-]+)+\b'
                 matches = re.findall(dns_regex, working_text)
                 for match in set(matches):
                     if '@' not in match:
@@ -278,11 +334,15 @@ class IOCParser:
             text = self.extract_text_from_docx(file_path)
             file_ioc_results = self.find_all_raw_matches(text)
 
-            # Добавляем метаданные к каждому IOC
+            # Добавляем метаданные и статус к каждому IOC
             for ioc_type, ioc_list in file_ioc_results.items():
-                # Проверяем что тип IOC существует в результатах
                 if ioc_type in ioc_results:
                     for original, cleaned in ioc_list:
-                        ioc_results[ioc_type].append((original, cleaned, metadata.copy()))
+                        meta = metadata.copy()
+                        if self.mode == "gossopka":
+                            meta["status"] = self._detect_ioc_status(text, original)
+                        else:
+                            meta["status"] = "block"
+                        ioc_results[ioc_type].append((original, cleaned, meta))
 
         return ioc_results

@@ -5,27 +5,32 @@ from typing import List, Optional, Tuple
 from ..model.config_manager import ConfigManager
 from ..model.ioc_parser_v21_fixed import IOCParser
 from ..model.report_generator import ReportGenerator
-from ..utils import get_default_filters_template_path
 
 
 class AppController:
     """Главный контроллер приложения."""
 
-    def __init__(self, config_path: str = "config.txt"):
-        """Инициализация контроллера."""
-        self.config_manager = ConfigManager(config_path)
+    def __init__(self, config_path: str = None):
+        """Инициализация контроллера.
+
+        Args:
+            config_path: Обратная совместимость. Если передан путь к .txt —
+                         берётся его директория как state_dir. Иначе
+                         трактуется как state_dir напрямую. None — умолчание.
+        """
+        if config_path and config_path.endswith('.txt'):
+            state_dir = os.path.dirname(os.path.abspath(config_path)) or '.'
+        else:
+            state_dir = config_path
+        self.config_manager = ConfigManager(state_dir)
         self.selected_files: List[str] = []
         self.last_ioc_data = None
         self.last_query_data = None
+        self.last_bdu_data = []
         self.bulletin = ""
         self.mode = "fstek"
         self.uri_clean_mode = "domain"
         self.event_type = "Фишинговая рассылка электронной почты. Вредоносные вложения"
-
-        # Путь к файлу-референсу для фильтров
-        # По умолчанию пытаемся найти в tst/
-        default_template = get_default_filters_template_path()
-        self.filters_template_path = default_template if os.path.exists(default_template) else None
     
     def get_config_data(self):
         """Возвращает текущую конфигурацию."""
@@ -85,36 +90,6 @@ class AppController:
     def get_event_type(self) -> str:
         """Возвращает текущий тип события."""
         return self.event_type
-
-    def set_filters_template_path(self, path: Optional[str]) -> None:
-        """
-        Устанавливает путь к файлу-референсу для фильтров.
-
-        Args:
-            path: Путь к .xlsx файлу-шаблону или None
-        """
-        if path and os.path.exists(path):
-            self.filters_template_path = path
-        else:
-            self.filters_template_path = None
-
-    def get_filters_template_path(self) -> Optional[str]:
-        """
-        Возвращает путь к файлу-референсу для фильтров.
-
-        Returns:
-            Путь к файлу или None если не установлен
-        """
-        return self.filters_template_path
-
-    def has_filters_template(self) -> bool:
-        """
-        Проверяет наличие файла-референса для фильтров.
-
-        Returns:
-            True если файл установлен и существует
-        """
-        return self.filters_template_path is not None and os.path.exists(self.filters_template_path)
 
     def extract_bulletin_from_filename(self, filename: str) -> Optional[str]:
         """Извлекает номер бюллетеня из имени файла (формат: XXX XX XXXX)."""
@@ -240,90 +215,146 @@ class AppController:
             # Извлекаем IOC
             log("\n📖 Чтение документов...")
             ioc_data = parser.parse(self.selected_files)
-            
+
+            # Фильтрация unblock IOC (только ГосСОПКА)
+            if self.mode == "gossopka":
+                unblock_iocs = {}
+                for ioc_type, ioc_list in ioc_data.items():
+                    unblocked = [x for x in ioc_list if x[2].get("status") == "unblock"]
+                    kept = [x for x in ioc_list if x[2].get("status") != "unblock"]
+                    if unblocked:
+                        unblock_iocs[ioc_type] = unblocked
+                    ioc_data[ioc_type] = kept
+
+                if unblock_iocs:
+                    total_unblock = sum(len(v) for v in unblock_iocs.values())
+                    log(f"\n⚠️ Найдено {total_unblock} IOC на РАЗБЛОКИРОВКУ (исключены из отчёта):")
+                    for ioc_type, items in unblock_iocs.items():
+                        for _, cleaned, meta in items:
+                            log(f"   🔓 [{ioc_type}] {cleaned} (файл: {meta['filename']})")
+
+            # Дедупликация по cleaned значению
+            total_before = sum(len(v) for v in ioc_data.values())
+            for ioc_type in ioc_data:
+                seen = set()
+                deduped = []
+                for item in ioc_data[ioc_type]:
+                    if item[1] not in seen:
+                        seen.add(item[1])
+                        deduped.append(item)
+                ioc_data[ioc_type] = deduped
+            total_after = sum(len(v) for v in ioc_data.values())
+
+            if total_before != total_after:
+                log(f"\n🔄 Удалено дубликатов: {total_before - total_after}")
+
             # Подсчитываем результаты
             total_iocs = sum(len(iocs) for iocs in ioc_data.values())
-            
+
             log(f"\n✨ Извлечение завершено!")
             log(f"📊 Найдено IOC по типам:")
-            
+
             for ioc_type, iocs in ioc_data.items():
-                log(f"   • {ioc_type}: {len(iocs)}")
-            
+                if iocs:
+                    if self.mode == "gossopka":
+                        blocks = sum(1 for x in iocs if x[2].get("status") == "block")
+                        searches = sum(1 for x in iocs if x[2].get("status") == "search")
+                        log(f"   • {ioc_type}: {len(iocs)} (🔒 block: {blocks}, 🔍 search: {searches})")
+                    else:
+                        log(f"   • {ioc_type}: {len(iocs)}")
+                else:
+                    log(f"   • {ioc_type}: 0")
+
             log(f"\n📈 Всего уникальных IOC: {total_iocs}")
-            
+
+            # Извлекаем BDU-идентификаторы
+            bdu_list = parser.extract_bdu_identifiers(self.selected_files)
+            if bdu_list:
+                log(f"\n📋 Найдено {len(bdu_list)} BDU-идентификаторов уязвимостей")
+                for bdu_id, fname in bdu_list:
+                    log(f"   • {bdu_id} ({fname})")
+            self.last_bdu_data = bdu_list
+
             # Сохраняем для последующего использования
             self.last_ioc_data = ioc_data
-            
+
             return True, ioc_data
             
         except Exception as e:
             log(f"\n❌ Критическая ошибка: {str(e)}")
             return False, None
     
-    def generate_reports(self, ioc_data: dict, output_xlsx_path: str, 
+    def generate_reports(self, ioc_data: dict, output_xlsx_path: str,
                         log_callback=None) -> Tuple[bool, Optional[str]]:
-        """Генерирует оба отчета (.xlsx и _queries.txt)."""
+        """Генерирует отчёт .xlsx (с листами IOC Report и Запросы) + файл фильтров."""
         def log(message):
             if log_callback:
                 log_callback(message)
-        
+
         try:
             # Проверяем наличие IOC
             if not ioc_data:
                 log("❌ Нет данных IOC для генерации отчетов.")
                 return False, None
-            
+
             total_iocs = sum(len(iocs) for iocs in ioc_data.values())
             if total_iocs == 0:
                 log("⚠️ Не найдено ни одного IOC для генерации отчетов.")
                 return False, None
-            
+
             log("\n📝 Генерация отчетов...")
-            
+
             # Создаем генератор отчетов с параметрами
             all_iocs = self.config_manager.get_enabled_iocs()
             generator = ReportGenerator(all_iocs, uri_clean_mode=self.uri_clean_mode)
 
-            # Генерируем .xlsx отчет
-            log("   • Создание .xlsx отчета (10 столбцов)...")
+            # Генерируем .xlsx отчет (IOC Report + Запросы)
+            log("   • Создание .xlsx отчета...")
             xlsx_success = generator.generate_xlsx_report(
                 ioc_data, output_xlsx_path,
                 bulletin=self.bulletin,
                 mode=self.mode,
                 event_type=self.event_type
             )
-            
+
             if not xlsx_success:
                 log("❌ Ошибка при создании .xlsx отчета.")
                 return False, None
-            
+
             log(f"   ✅ .xlsx отчет сохранен: {os.path.basename(output_xlsx_path)}")
-            
-            # Генерируем .txt файл с запросами
-            base_name = os.path.splitext(output_xlsx_path)[0]
-            queries_path = f"{base_name}_queries.txt"
-            
-            log("   • Создание файла запросов (объединенные запросы)...")
-            queries_success = generator.generate_queries_report(ioc_data, queries_path)
-            
-            if not queries_success:
-                log("❌ Ошибка при создании файла запросов.")
-                return True, None
-            
-            log(f"   ✅ Файл запросов сохранен: {os.path.basename(queries_path)}")
-            
+
             # Генерируем данные запросов для GUI
             self.last_query_data = generator.generate_query_data(ioc_data)
-            
+
+            # Генерируем файл фильтров
+            filter_filename = self.generate_filters_filename()
+            filters_path = os.path.join(os.path.dirname(output_xlsx_path), filter_filename)
+            self.generate_filters_file(ioc_data, filters_path, log_callback=log_callback)
+
+            # Сохраняем BDU в текстовый файл
+            base_name = os.path.splitext(output_xlsx_path)[0]
+            if self.last_bdu_data:
+                bdu_path = f"{base_name}_bdu.txt"
+                with open(bdu_path, 'w', encoding='utf-8') as f:
+                    f.write("BDU-идентификаторы уязвимостей\n")
+                    f.write("=" * 40 + "\n\n")
+                    for bdu_id, fname in self.last_bdu_data:
+                        f.write(f"{bdu_id}  ({fname})\n")
+                log(f"   ✅ BDU-идентификаторы сохранены: {os.path.basename(bdu_path)}")
+
             log("\n🎉 Все отчеты успешно созданы!")
-            
-            return True, queries_path
-            
+
+            return True, None
+
         except Exception as e:
             log(f"\n❌ Ошибка при генерации отчетов: {str(e)}")
             return False, None
     
+    @staticmethod
+    def build_query(template, ioc_values, join_op):
+        """Обёртка для сборки запроса из шаблона и списка IOC."""
+        return ReportGenerator._build_query(template, ioc_values, join_op)
+
     def get_last_query_data(self):
         """Возвращает данные последних сгенерированных запросов."""
         return self.last_query_data
@@ -332,14 +363,25 @@ class AppController:
         """Изменяет приоритет IOC."""
         return self.config_manager.move_ioc(index, direction)
 
-    def generate_filters_file(self, ioc_data: dict, template_path: str,
+    def reset_ioc_to_default(self, index: int) -> bool:
+        """Сбрасывает один IOC к значениям по умолчанию."""
+        return self.config_manager.reset_ioc_to_default(index)
+
+    def reset_all_to_defaults(self) -> None:
+        """Сбрасывает всю конфигурацию к умолчаниям."""
+        self.config_manager.reset_all_to_defaults()
+
+    def get_state_file_path(self) -> str:
+        """Возвращает путь к файлу настроек."""
+        return self.config_manager.state_file_path
+
+    def generate_filters_file(self, ioc_data: dict,
                              output_path: str, log_callback=None) -> bool:
         """
-        Генерирует файл "Фильтры.xlsx" на основе шаблона.
+        Генерирует файл "Фильтры.xlsx" программно.
 
         Args:
             ioc_data: Данные IOC
-            template_path: Путь к шаблону
             output_path: Путь для сохранения
             log_callback: Функция для логирования
 
@@ -358,7 +400,7 @@ class AppController:
             generator = ReportGenerator(all_iocs, uri_clean_mode=self.uri_clean_mode)
 
             # Генерируем файл фильтров
-            success = generator.generate_filters_xlsx(ioc_data, template_path, output_path, log_callback=log_callback)
+            success = generator.generate_filters_xlsx(ioc_data, output_path, log_callback=log_callback)
 
             if success:
                 return True

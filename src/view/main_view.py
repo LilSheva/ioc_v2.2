@@ -7,110 +7,140 @@ from ttkbootstrap.constants import *
 from .tabs.main_tab import MainTab
 from .tabs.settings_tab import SettingsTab
 from .tabs.results_tab import ResultsTab
+from .tabs.info_tab import InfoTab
 
 
 class MainView:
     """Главное окно приложения."""
-    
+
     def __init__(self, controller):
-        """
-        Инициализация главного окна.
-        
-        Args:
-            controller: Контроллер приложения
-        """
         self.controller = controller
-        
-        # Создание главного окна
+
         self.root = ttk.Window(
-            title="IOC Parser - Извлечение индикаторов компрометации",
+            title="IOC Parser v2.2",
             themename="darkly",
             size=(1200, 800),
             resizable=(True, True)
         )
-        
-        # Установка минимального размера окна
+
         self.root.minsize(900, 600)
-        
-        # Центрирование окна
         self.root.position_center()
-        
-        # Создание интерфейса
         self._setup_ui()
-    
+        self._apply_rounded_styles()
+
     def _setup_ui(self):
         """Создание элементов интерфейса."""
-        # Заголовок приложения
-        header_frame = ttk.Frame(self.root, padding=10)
+        # ── Заголовок: одна строка, название слева, тоглер темы справа ──
+        header_frame = ttk.Frame(self.root, padding=(15, 10))
         header_frame.pack(fill=X, side=TOP)
-        
-        title_label = ttk.Label(
-            header_frame,
-            text="🔍 IOC Parser - Анализатор индикаторов компрометации",
-            font=("TkDefaultFont", 16, "bold"),
+
+        title_left = ttk.Frame(header_frame)
+        title_left.pack(side=LEFT)
+
+        ttk.Label(
+            title_left,
+            text="IOC Parser",
+            font=("Segoe UI", 17, "bold"),
             bootstyle=PRIMARY
-        )
-        title_label.pack()
-        
-        subtitle_label = ttk.Label(
+        ).pack(side=LEFT)
+
+        ttk.Label(
+            title_left,
+            text="  v2.2",
+            font=("Segoe UI", 11),
+            bootstyle=SECONDARY
+        ).pack(side=LEFT, pady=(4, 0))
+
+        ttk.Label(
+            title_left,
+            text="   |   Анализатор индикаторов компрометации",
+            font=("Segoe UI", 11),
+            bootstyle=SECONDARY
+        ).pack(side=LEFT, pady=(4, 0))
+
+        # Тоглер темы
+        self._is_dark = True
+        self._theme_btn = ttk.Button(
             header_frame,
-            text="Извлечение IOC из документов Word и генерация отчетов",
-            font=("TkDefaultFont", 10)
+            text="☀️ Переходи на сторону добра",
+            command=self._toggle_theme,
+            bootstyle="warning-outline",
         )
-        subtitle_label.pack(pady=(5, 0))
-        
-        # Разделитель
-        separator = ttk.Separator(self.root, orient=HORIZONTAL)
-        separator.pack(fill=X, padx=10)
-        
-        # Создание Notebook с вкладками
+        self._theme_btn.pack(side=RIGHT)
+
+        # ── Разделитель ──
+        ttk.Separator(self.root, orient=HORIZONTAL).pack(fill=X, padx=10)
+
+        # ── Вкладки ──
         self.notebook = ttk.Notebook(self.root)
-        self.notebook.pack(fill=BOTH, expand=True, padx=10, pady=10)
-        
-        # Создание вкладок
+        self.notebook.pack(fill=BOTH, expand=True, padx=10, pady=(8, 5))
+
         self.main_tab = MainTab(self.notebook, self.controller)
         self.settings_tab = SettingsTab(self.notebook, self.controller)
         self.results_tab = ResultsTab(self.notebook, self.controller)
-        
-        # Добавление вкладок в Notebook
-        self.notebook.add(self.main_tab.get_frame(), text="  🏠 Главная  ")
-        self.notebook.add(self.settings_tab.get_frame(), text="  ⚙️ Настройка IOC  ")
-        self.notebook.add(self.results_tab.get_frame(), text="  📊 Результаты запросов  ")
-        
-        # Футер с информацией
-        footer_frame = ttk.Frame(self.root, padding=10)
+        self.info_tab = InfoTab(self.notebook, self.controller)
+
+        self.notebook.add(self.main_tab.get_frame(), text="  Главная  ")
+        self.notebook.add(self.settings_tab.get_frame(), text="  Настройка IOC  ")
+        self.notebook.add(self.results_tab.get_frame(), text="  Результаты запросов  ")
+        self.notebook.add(self.info_tab.get_frame(), text="  Инструкция  ")
+
+        # ── Футер ──
+        footer_frame = ttk.Frame(self.root, padding=(15, 6))
         footer_frame.pack(fill=X, side=BOTTOM)
-        
-        footer_label = ttk.Label(
+
+        ttk.Separator(self.root, orient=HORIZONTAL).pack(fill=X, padx=10, side=BOTTOM)
+
+        ttk.Label(
             footer_frame,
-            text="IOC Parser v2.2 | Поддержка форматов: .docx | Отчеты: .xlsx, .txt",
-            font=("TkDefaultFont", 9),
+            text="IOC Parser v2.2  |  .docx → .xlsx",
+            font=("Segoe UI", 9),
             bootstyle=SECONDARY
-        )
-        footer_label.pack()
-        
-        # Биндинг событий
+        ).pack(side=LEFT)
+
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
-    
+
     def _on_tab_changed(self, event):
-        """
-        Обработчик переключения вкладок.
-        
-        Args:
-            event: Событие переключения вкладки
-        """
         current_tab = self.notebook.index(self.notebook.select())
-        
-        # Если переключились на вкладку "Результаты запросов"
         if current_tab == 2:
-            # Автоматически обновляем данные, если они есть
             if self.controller.get_last_query_data():
                 self.results_tab.refresh_data()
-    
+
+    def _apply_rounded_styles(self):
+        """Увеличенные отступы на всех виджетах — мягкий, «пухлый» вид."""
+        s = self.root.style
+
+        # Кнопки: больше внутреннего пространства → визуально мягче
+        s.configure('TButton', padding=(12, 6))
+
+        # Поля ввода: выше, воздушнее
+        s.configure('TEntry', padding=(8, 5))
+        s.configure('TSpinbox', padding=(8, 5))
+        s.configure('TCombobox', padding=(8, 5))
+
+        # Радиокнопки и чекбоксы: немного больше отступа
+        s.configure('TRadiobutton', padding=(6, 4))
+        s.configure('TCheckbutton', padding=(6, 4))
+
+        # Заголовки LabelFrame: шрифт Segoe UI
+        s.configure('TLabelframe.Label', font=("Segoe UI", 10))
+
+        # Вкладки Notebook: более высокие табы
+        s.configure('TNotebook.Tab', padding=(14, 6))
+
+    def _toggle_theme(self):
+        """Переключает тему между тёмной и светлой."""
+        if self._is_dark:
+            self.root.style.theme_use("cosmo")
+            self._theme_btn.configure(text="🌙 Переходи на тёмную сторону")
+        else:
+            self.root.style.theme_use("darkly")
+            self._theme_btn.configure(text="☀️ Переходи на сторону добра")
+        self._is_dark = not self._is_dark
+        self._apply_rounded_styles()
+
     def run(self):
-        """Запуск главного цикла приложения."""
         self.root.mainloop()
-    
+
     def destroy(self):
-        """Закрытие приложения."""
         self.root.destroy()

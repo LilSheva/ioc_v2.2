@@ -14,6 +14,7 @@ def setup_console_mode():
     if sys.stdout is None:
         sys.stdout = open(os.devnull, 'w')
     if sys.stderr is None:
+    
         sys.stderr = open(os.devnull, 'w')
 
 
@@ -27,7 +28,7 @@ def main():
         from src.controller.app_controller import AppController
         from src.view.main_view import MainView
         # Создание контроллера
-        controller = AppController(config_path="config.txt")
+        controller = AppController()
         
         # Создание и запуск GUI
         view = MainView(controller)
