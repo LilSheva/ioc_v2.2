@@ -7,6 +7,7 @@ from ttkbootstrap.constants import *
 from .tabs.main_tab import MainTab
 from .tabs.settings_tab import SettingsTab
 from .tabs.results_tab import ResultsTab
+from .tabs.ip_tab import IPTab
 from .tabs.info_tab import InfoTab
 
 
@@ -78,11 +79,13 @@ class MainView:
         self.main_tab = MainTab(self.notebook, self.controller)
         self.settings_tab = SettingsTab(self.notebook, self.controller)
         self.results_tab = ResultsTab(self.notebook, self.controller)
+        self.ip_tab = IPTab(self.notebook, self.controller)
         self.info_tab = InfoTab(self.notebook, self.controller)
 
         self.notebook.add(self.main_tab.get_frame(), text="  Главная  ")
         self.notebook.add(self.settings_tab.get_frame(), text="  Настройка IOC  ")
         self.notebook.add(self.results_tab.get_frame(), text="  Результаты запросов  ")
+        self.notebook.add(self.ip_tab.get_frame(), text="  IP управление  ")
         self.notebook.add(self.info_tab.get_frame(), text="  Инструкция  ")
 
         # ── Футер ──
@@ -105,6 +108,8 @@ class MainView:
         if current_tab == 2:
             if self.controller.get_last_query_data():
                 self.results_tab.refresh_data()
+        elif current_tab == 3:
+            self.ip_tab.refresh_data()
 
     def _apply_rounded_styles(self):
         """Увеличенные отступы на всех виджетах — мягкий, «пухлый» вид."""

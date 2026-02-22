@@ -122,11 +122,6 @@ class IOCParser:
         if ioc_type == 'URI':
             if '://' in cleaned:
                 cleaned = 'http' + cleaned[cleaned.find('://'):]
-            port_pattern = r'^(https?://)([a-zA-Z0-9.-]+)(:\d+)(/.*)?$'
-            match = re.match(port_pattern, cleaned)
-            if match:
-                protocol, host, _, path = match.groups()
-                cleaned = f"{protocol}{host}{path or ''}"
 
         return cleaned
 

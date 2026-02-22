@@ -199,36 +199,7 @@ class ReportGenerator:
             ws.column_dimensions['G'].width = 90
             ws.column_dimensions['H'].width = 90
             ws.column_dimensions['I'].width = 30
-            ws.column_dimensions['J'].width = 64
-            
-            # --- Лист "Запросы" ---
-            ws_q = wb.create_sheet(title="Запросы")
-            q_headers = ["Тип IOC", "Система", "Запрос"]
-            ws_q.append(q_headers)
-
-            for col_num in range(1, len(q_headers) + 1):
-                cell = ws_q.cell(row=1, column=col_num)
-                cell.fill = header_fill
-                cell.font = header_font
-                cell.alignment = header_alignment
-
-            for ioc_cfg in self.ioc_config:
-                if not ioc_cfg.get('enabled', False):
-                    continue
-                name = ioc_cfg['name']
-                if name not in ioc_data or not ioc_data[name]:
-                    continue
-                cleaned_iocs = [cleaned for _, cleaned, _ in ioc_data[name]]
-
-                for template in ioc_cfg.get('mp10_templates', []):
-                    ws_q.append([name, "MP10", self._build_query(template, cleaned_iocs, " OR ")])
-
-                for template in ioc_cfg.get('nad_templates', []):
-                    ws_q.append([name, "NAD", self._build_query(template, cleaned_iocs, " || ")])
-
-            ws_q.column_dimensions['A'].width = 14
-            ws_q.column_dimensions['B'].width = 10
-            ws_q.column_dimensions['C'].width = 120
+            ws.column_dimensions['J'].width = 80
 
             wb.save(output_path)
             return True
@@ -240,7 +211,55 @@ class ReportGenerator:
     def generate_query_data(self, ioc_data: Dict[str, List[Tuple[str, str, dict]]]) -> List[Dict[str, Any]]:
         """
         Генерирует структурированные данные запросов для отображения в GUI.
+
+        URI предобрабатываются: домены → DNS, IP-адреса → IP. Отдельная группа URI не создаётся.
         """
+        # --- Предобработка URI: извлечь домены/IP, объединить с DNS/IP ---
+        merged_data: Dict[str, List[Tuple[str, str, dict]]] = {}
+        for key, items in ioc_data.items():
+            if items:
+                merged_data[key] = list(items)
+
+        if 'URI' in merged_data and merged_data['URI']:
+            uri_items = merged_data.pop('URI')
+            for original, cleaned, metadata in uri_items:
+                try:
+                    parsed = urlparse(cleaned if cleaned.startswith('http') else 'http://' + cleaned)
+                    domain = parsed.netloc or parsed.path.split('/')[0]
+                except Exception:
+                    domain = cleaned
+
+                if self._is_ip_address(domain):
+                    merged_data.setdefault('IP', []).append((original, domain, metadata))
+                else:
+                    merged_data.setdefault('DNS', []).append((original, domain, metadata))
+
+        # Дедупликация cleaned-значений внутри каждой группы
+        for key in merged_data:
+            seen = set()
+            deduped = []
+            for item in merged_data[key]:
+                if item[1] not in seen:
+                    seen.add(item[1])
+                    deduped.append(item)
+            merged_data[key] = deduped
+
+        # --- Собираем шаблоны по типам (DNS + URI шаблоны объединяются для DNS) ---
+        config_by_name = {cfg['name']: cfg for cfg in self.ioc_config if cfg.get('enabled', False)}
+
+        # Маппинг: query-группа -> список ioc_config names, из которых брать шаблоны
+        type_template_sources: Dict[str, List[str]] = {}
+        for cfg in self.ioc_config:
+            if not cfg.get('enabled', False):
+                continue
+            name = cfg['name']
+            if name == 'URI':
+                # URI шаблоны объединяются с DNS
+                type_template_sources.setdefault('DNS', []).append(name)
+            else:
+                type_template_sources.setdefault(name, []).append(name)
+
+        # --- Генерация query_data ---
         query_data = []
 
         for ioc_config in self.ioc_config:
@@ -248,35 +267,52 @@ class ReportGenerator:
                 continue
 
             name = ioc_config['name']
-            if name in ioc_data and ioc_data[name]:
-                group_queries = []
-                cleaned_iocs = [cleaned for _, cleaned, _ in ioc_data[name]]
+            if name == 'URI':
+                continue  # URI не создаёт отдельную группу
 
-                for template in ioc_config.get('mp10_templates', []):
-                    group_queries.append({
-                        'ioc_name': name, 'system': 'MP10',
-                        'query': self._build_query(template, cleaned_iocs, " OR "),
-                        'template': template,
-                        'join_op': ' OR ',
-                        'completed': False
-                    })
+            if name not in merged_data or not merged_data[name]:
+                continue
 
-                for template in ioc_config.get('nad_templates', []):
-                    group_queries.append({
-                        'ioc_name': name, 'system': 'NAD',
-                        'query': self._build_query(template, cleaned_iocs, " || "),
-                        'template': template,
-                        'join_op': ' || ',
-                        'completed': False
-                    })
+            cleaned_iocs = [cleaned for _, cleaned, _ in merged_data[name]]
 
-                if group_queries:
-                    query_data.append({
-                        'group_name': f"{name} ({ioc_config['report_type']})",
-                        'ioc_count': len(cleaned_iocs),
-                        'cleaned_iocs': cleaned_iocs,
-                        'queries': group_queries
-                    })
+            # Собираем шаблоны из всех источников для этого типа
+            sources = type_template_sources.get(name, [name])
+            mp10_templates = []
+            nad_templates = []
+            for src_name in sources:
+                src_cfg = config_by_name.get(src_name, {})
+                mp10_templates.extend(src_cfg.get('mp10_templates', []))
+                nad_templates.extend(src_cfg.get('nad_templates', []))
+            mp10_templates = list(dict.fromkeys(mp10_templates))
+            nad_templates = list(dict.fromkeys(nad_templates))
+
+            group_queries = []
+
+            for template in mp10_templates:
+                group_queries.append({
+                    'ioc_name': name, 'system': 'MP10',
+                    'query': self._build_query(template, cleaned_iocs, " OR "),
+                    'template': template,
+                    'join_op': ' OR ',
+                    'completed': False
+                })
+
+            for template in nad_templates:
+                group_queries.append({
+                    'ioc_name': name, 'system': 'NAD',
+                    'query': self._build_query(template, cleaned_iocs, " || "),
+                    'template': template,
+                    'join_op': ' || ',
+                    'completed': False
+                })
+
+            if group_queries:
+                query_data.append({
+                    'group_name': f"{name} ({ioc_config['report_type']})",
+                    'ioc_count': len(cleaned_iocs),
+                    'cleaned_iocs': cleaned_iocs,
+                    'queries': group_queries
+                })
 
         return query_data
 
@@ -384,6 +420,8 @@ class ReportGenerator:
                     if cfg['name'] in ioc_types:
                         mp10.extend(cfg.get('mp10_templates', []))
                         nad.extend(cfg.get('nad_templates', []))
+                mp10 = list(dict.fromkeys(mp10))
+                nad = list(dict.fromkeys(nad))
                 sheet_templates[sname] = {'mp10': mp10, 'nad': nad}
 
             from openpyxl.utils import get_column_letter

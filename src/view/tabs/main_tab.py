@@ -238,15 +238,7 @@ class MainTab:
             messagebox.showinfo("Информация", "В выбранных документах не найдено ни одного IOC.")
             return
 
-        selected_files = self.controller.get_selected_files()
-        if len(selected_files) == 1:
-            input_filename = os.path.splitext(os.path.basename(selected_files[0]))[0]
-        else:
-            input_filename = "multiple_files"
-
-        from datetime import datetime
-        current_time = datetime.now().strftime('%d-%m-%y-%H-%M')
-        default_filename = f"ioc_report_{input_filename}_{current_time}.xlsx"
+        default_filename = self.controller.generate_report_filename()
 
         output_path = filedialog.asksaveasfilename(
             title="Сохранить отчет как...",

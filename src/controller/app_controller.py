@@ -27,6 +27,7 @@ class AppController:
         self.last_ioc_data = None
         self.last_query_data = None
         self.last_bdu_data = []
+        self.last_unblock_data = {}
         self.bulletin = ""
         self.mode = "fstek"
         self.uri_clean_mode = "domain"
@@ -171,6 +172,41 @@ class AppController:
 
             return f"Фильтры (ГосСОПКА) {current_time}.xlsx"
 
+    def generate_report_filename(self) -> str:
+        """Генерирует имя файла отчёта в зависимости от режима."""
+        from datetime import datetime
+        current_time = datetime.now().strftime('%d.%m.%Y %H-%M')
+
+        if self.mode == "fstek":
+            bulletin = self.bulletin or self.auto_fill_bulletin() or "Без бюллетеня"
+            bulletin = bulletin.replace('/', '-')
+            return f"Отчет (FSTEC {bulletin}) {current_time}.xlsx"
+
+        else:
+            info_list = []
+            for file_path in self.selected_files:
+                filename = os.path.basename(file_path)
+                info = self.extract_gossopka_info_from_filename(filename)
+                if info:
+                    info_list.append(info)
+
+            if not info_list:
+                return f"Отчет (ГосСОПКА) {current_time}.xlsx"
+
+            groups = {}
+            for info in info_list:
+                key = (info["org"], info["date"])
+                if key not in groups:
+                    groups[key] = []
+                groups[key].append(info["number"])
+
+            if groups:
+                (org, date), numbers = list(groups.items())[0]
+                numbers_str = ",".join(sorted(numbers))
+                return f"Отчет ({org} от {date} ({numbers_str})) {current_time}.xlsx"
+
+            return f"Отчет (ГосСОПКА) {current_time}.xlsx"
+
     def validate_files(self) -> Tuple[bool, str]:
         """Валидация выбранных файлов."""
         if not self.selected_files:
@@ -225,6 +261,8 @@ class AppController:
                     if unblocked:
                         unblock_iocs[ioc_type] = unblocked
                     ioc_data[ioc_type] = kept
+
+                self.last_unblock_data = unblock_iocs
 
                 if unblock_iocs:
                     total_unblock = sum(len(v) for v in unblock_iocs.values())
@@ -286,7 +324,7 @@ class AppController:
     
     def generate_reports(self, ioc_data: dict, output_xlsx_path: str,
                         log_callback=None) -> Tuple[bool, Optional[str]]:
-        """Генерирует отчёт .xlsx (с листами IOC Report и Запросы) + файл фильтров."""
+        """Генерирует отчёт .xlsx (IOC Report) + файл фильтров."""
         def log(message):
             if log_callback:
                 log_callback(message)
@@ -308,7 +346,7 @@ class AppController:
             all_iocs = self.config_manager.get_enabled_iocs()
             generator = ReportGenerator(all_iocs, uri_clean_mode=self.uri_clean_mode)
 
-            # Генерируем .xlsx отчет (IOC Report + Запросы)
+            # Генерируем .xlsx отчет (IOC Report)
             log("   • Создание .xlsx отчета...")
             xlsx_success = generator.generate_xlsx_report(
                 ioc_data, output_xlsx_path,
@@ -358,6 +396,10 @@ class AppController:
     def get_last_query_data(self):
         """Возвращает данные последних сгенерированных запросов."""
         return self.last_query_data
+
+    def get_last_unblock_data(self):
+        """Возвращает данные IOC на разблокировку."""
+        return self.last_unblock_data
     
     def move_ioc_priority(self, index: int, direction: int) -> bool:
         """Изменяет приоритет IOC."""
