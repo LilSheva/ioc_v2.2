@@ -430,7 +430,8 @@ class AppController:
                     return f"{info['org']} от {info['date']} ({info['number']})"
             return ""
 
-    def generate_csv_for_sasha(self, k_value, output_dir, log_callback=None) -> bool:
+    def generate_csv_for_sasha(self, k_value, output_dir, delimiter=',',
+                               use_bom=False, log_callback=None) -> bool:
         """Генерирует Value.csv и IOC_hash_manually.csv."""
         def log(message):
             if log_callback:
@@ -466,9 +467,10 @@ class AppController:
             md5_list = [item[1] for item in ioc_data.get("MD5", [])]
 
             # Value.csv — все хеши вместе
+            encoding = 'utf-8-sig' if use_bom else 'utf-8'
             value_path = os.path.join(output_dir, "Value.csv")
-            with open(value_path, 'w', newline='', encoding='utf-8-sig') as f:
-                writer = csv.writer(f, delimiter=';')
+            with open(value_path, 'w', newline='', encoding=encoding) as f:
+                writer = csv.writer(f, delimiter=delimiter)
                 writer.writerow(["value", "category", "description"])
                 for h in sha256_list:
                     writer.writerow([h, "hash", description])
@@ -484,8 +486,8 @@ class AppController:
             manual_path = os.path.join(output_dir, "IOC_hash_manually.csv")
             max_len = max(len(sha256_list), len(md5_list), 1)
 
-            with open(manual_path, 'w', newline='', encoding='utf-8-sig') as f:
-                writer = csv.writer(f, delimiter=';')
+            with open(manual_path, 'w', newline='', encoding=encoding) as f:
+                writer = csv.writer(f, delimiter=delimiter)
                 writer.writerow(["Number", "hash_sha256", "hash_md5", "description"])
                 for i in range(max_len):
                     if k_value is not None:

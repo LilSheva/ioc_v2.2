@@ -159,7 +159,35 @@ class MainTab:
         self._sasha_k_entry = ttk.Entry(
             self._sasha_panel, textvariable=self._sasha_k_var, width=10
         )
-        self._sasha_k_entry.pack(fill=X, pady=(0, 10))
+        self._sasha_k_entry.pack(fill=X, pady=(0, 8))
+
+        # Разделитель CSV
+        ttk.Label(
+            self._sasha_panel, text="Разделитель:",
+            font=("Segoe UI", 9), anchor=W
+        ).pack(fill=X, pady=(0, 2))
+        self._csv_delimiter_var = ttk.StringVar(value=",")
+        delim_row = ttk.Frame(self._sasha_panel)
+        delim_row.pack(fill=X, pady=(0, 4))
+        ttk.Radiobutton(
+            delim_row, text=",", variable=self._csv_delimiter_var,
+            value=",", bootstyle="warning"
+        ).pack(side=LEFT, padx=(0, 8))
+        ttk.Radiobutton(
+            delim_row, text=";", variable=self._csv_delimiter_var,
+            value=";", bootstyle="warning"
+        ).pack(side=LEFT, padx=(0, 8))
+        ttk.Radiobutton(
+            delim_row, text="tab", variable=self._csv_delimiter_var,
+            value="\t", bootstyle="warning"
+        ).pack(side=LEFT)
+
+        # BOM чекбокс
+        self._csv_bom_var = ttk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            self._sasha_panel, text="BOM (для Excel)",
+            variable=self._csv_bom_var, bootstyle="warning"
+        ).pack(fill=X, pady=(0, 8))
 
         self._sasha_csv_btn = ttk.Button(
             self._sasha_panel,
@@ -399,8 +427,12 @@ class MainTab:
         self.log("ГЕНЕРАЦИЯ CSV (Для Саши)")
         self.log("=" * 70)
 
+        delimiter = self._csv_delimiter_var.get()
+        use_bom = self._csv_bom_var.get()
+
         success = self.controller.generate_csv_for_sasha(
-            k_value, output_dir, log_callback=self.log
+            k_value, output_dir, delimiter=delimiter, use_bom=use_bom,
+            log_callback=self.log
         )
 
         if success:
