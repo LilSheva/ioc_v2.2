@@ -1,6 +1,7 @@
 """Контроллер приложения для координации между моделью и представлением."""
 
 import os
+import csv
 from typing import List, Optional, Tuple
 from ..model.config_manager import ConfigManager
 from ..model.ioc_parser_v21_fixed import IOCParser
@@ -180,7 +181,7 @@ class AppController:
         if self.mode == "fstek":
             bulletin = self.bulletin or self.auto_fill_bulletin() or "Без бюллетеня"
             bulletin = bulletin.replace('/', '-')
-            return f"Отчет (FSTEC {bulletin}) {current_time}.xlsx"
+            return f"Отчет ({bulletin}) {current_time}.xlsx"
 
         else:
             info_list = []
@@ -416,6 +417,92 @@ class AppController:
     def get_state_file_path(self) -> str:
         """Возвращает путь к файлу настроек."""
         return self.config_manager.state_file_path
+
+    def _get_description(self) -> str:
+        """Возвращает описание (номер бюллетеня/документа) для CSV."""
+        if self.mode == "fstek":
+            return self.bulletin or self.auto_fill_bulletin() or ""
+        else:
+            for file_path in self.selected_files:
+                filename = os.path.basename(file_path)
+                info = self.extract_gossopka_info_from_filename(filename)
+                if info:
+                    return f"{info['org']} от {info['date']} ({info['number']})"
+            return ""
+
+    def generate_csv_for_sasha(self, k_value, output_dir, log_callback=None) -> bool:
+        """Генерирует Value.csv и IOC_hash_manually.csv."""
+        def log(message):
+            if log_callback:
+                log_callback(message)
+
+        try:
+            valid, msg = self.validate_files()
+            if not valid:
+                log(f"Ошибка валидации: {msg}")
+                return False
+
+            log("Извлечение IOC для CSV...")
+
+            enabled_iocs = self.config_manager.get_enabled_iocs()
+            parser = IOCParser(enabled_iocs, mode=self.mode)
+            ioc_data = parser.parse(self.selected_files)
+
+            # Дедупликация
+            for ioc_type in ioc_data:
+                seen = set()
+                deduped = []
+                for item in ioc_data[ioc_type]:
+                    if item[1] not in seen:
+                        seen.add(item[1])
+                        deduped.append(item)
+                ioc_data[ioc_type] = deduped
+
+            description = self._get_description()
+
+            # Собираем хеши
+            sha256_list = [item[1] for item in ioc_data.get("SHA256", [])]
+            sha1_list = [item[1] for item in ioc_data.get("SHA1", [])]
+            md5_list = [item[1] for item in ioc_data.get("MD5", [])]
+
+            # Value.csv — все хеши вместе
+            value_path = os.path.join(output_dir, "Value.csv")
+            with open(value_path, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow(["value", "category", "description"])
+                for h in sha256_list:
+                    writer.writerow([h, "hash", description])
+                for h in sha1_list:
+                    writer.writerow([h, "hash", description])
+                for h in md5_list:
+                    writer.writerow([h, "hash", description])
+
+            total_hashes = len(sha256_list) + len(sha1_list) + len(md5_list)
+            log(f"Value.csv: {total_hashes} хешей")
+
+            # IOC_hash_manually.csv — sha256 и md5 по строкам
+            manual_path = os.path.join(output_dir, "IOC_hash_manually.csv")
+            max_len = max(len(sha256_list), len(md5_list), 1)
+
+            with open(manual_path, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow(["Number", "hash_sha256", "hash_md5", "description"])
+                for i in range(max_len):
+                    if k_value is not None:
+                        number = k_value + i
+                    else:
+                        number = ""
+                    sha256_val = sha256_list[i] if i < len(sha256_list) else ""
+                    md5_val = md5_list[i] if i < len(md5_list) else ""
+                    writer.writerow([number, sha256_val, md5_val, description])
+
+            log(f"IOC_hash_manually.csv: {max_len} строк")
+            log("CSV файлы успешно созданы!")
+            return True
+
+        except Exception as e:
+            log(f"Ошибка при генерации CSV: {str(e)}")
+            return False
 
     def generate_filters_file(self, ioc_data: dict,
                              output_path: str, log_callback=None) -> bool:

@@ -508,14 +508,18 @@ class ReportGenerator:
         """
         Формирует запрос из шаблона и списка IOC.
 
-        Извлекает имя поля из шаблона (=, ==, CONTAINS, ~) и формирует field in ["v1", "v2", ...].
+        Извлекает имя поля из шаблона и формирует field in ["v1", "v2", ...].
         """
-        m = re.match(r'^(.+?)\s*(?:={1,2}|CONTAINS|~)\s*"\{ioc\}"$', template)
+        # Попытка извлечь имя поля: всё до оператора перед "{ioc}"
+        m = re.match(r'^(.+?)\s*(?:={1,2}|!=|<>|CONTAINS|contains|LIKE|like|~|IN|in)\s*"\{ioc\}"$', template)
+        if not m:
+            # Мягкий fallback: всё до пробела(ов) перед "{ioc}"
+            m = re.match(r'^(.+?)\s+"\{ioc\}"$', template)
         if m:
             field = m.group(1).rstrip()
             values_str = ", ".join(f'"{v}"' for v in ioc_values)
             return f'{field} in [{values_str}]'
-        # Fallback — подстановка по одному
+        # Последний fallback — если шаблон совсем нестандартный
         queries = [template.replace('{ioc}', ioc) for ioc in ioc_values]
         return join_op.join(queries)
 

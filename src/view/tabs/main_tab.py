@@ -57,10 +57,17 @@ class MainTab:
         self.file_count_label.pack(side=RIGHT, padx=(10, 0))
 
         # ═══════════════════════════════════════════════════════════
-        #  2. Параметры отчёта
+        #  2. Параметры отчёта + панель «Для Саши»
         # ═══════════════════════════════════════════════════════════
-        params_frame = ttk.LabelFrame(self.frame, text="Параметры отчёта", padding=10)
-        params_frame.pack(fill=X, pady=(0, 8))
+        params_container = ttk.Frame(self.frame)
+        params_container.pack(fill=X, pady=(0, 8))
+
+        # Левая часть: параметры + кнопка генерации
+        left_side = ttk.Frame(params_container)
+        left_side.pack(side=LEFT, fill=BOTH, expand=True)
+
+        params_frame = ttk.LabelFrame(left_side, text="Параметры отчёта", padding=10)
+        params_frame.pack(fill=X)
 
         # Grid для ровного выравнивания меток и значений
         params_frame.columnconfigure(1, weight=1)
@@ -121,16 +128,46 @@ class MainTab:
         )
         self.bulletin_hint.grid(row=0, column=1, padx=(10, 0))
 
-        # ═══════════════════════════════════════════════════════════
-        #  3. Кнопка генерации — на всю ширину, крупная
-        # ═══════════════════════════════════════════════════════════
+        # Кнопка генерации — на всю ширину левой части
         self.generate_btn = ttk.Button(
-            self.frame,
+            left_side,
             text="Сформировать отчёты",
             command=self._generate_reports,
             bootstyle=SUCCESS,
         )
-        self.generate_btn.pack(fill=X, pady=(0, 8), ipady=6)
+        self.generate_btn.pack(fill=X, pady=(8, 0), ipady=6)
+
+        # Кнопка-переключатель «Для Саши»
+        self._sasha_expanded = False
+        self._sasha_toggle_btn = ttk.Button(
+            params_container,
+            text="◀\nД\nл\nя\n\nС\nа\nш\nи",
+            command=self._toggle_sasha_panel,
+            bootstyle="warning-outline",
+            width=3,
+        )
+        self._sasha_toggle_btn.pack(side=LEFT, fill=Y, padx=(4, 0))
+
+        # Панель «Для Саши» (изначально скрыта)
+        self._sasha_panel = ttk.LabelFrame(params_container, text="Для Саши", padding=10)
+
+        self._sasha_k_var = ttk.StringVar(value="")
+        ttk.Label(
+            self._sasha_panel, text="Начальный номер (k):",
+            font=("Segoe UI", 9), anchor=W
+        ).pack(fill=X, pady=(0, 4))
+        self._sasha_k_entry = ttk.Entry(
+            self._sasha_panel, textvariable=self._sasha_k_var, width=10
+        )
+        self._sasha_k_entry.pack(fill=X, pady=(0, 10))
+
+        self._sasha_csv_btn = ttk.Button(
+            self._sasha_panel,
+            text="CSV",
+            command=self._generate_csv_for_sasha,
+            bootstyle="warning",
+        )
+        self._sasha_csv_btn.pack(fill=BOTH, expand=True, ipady=6)
 
         # ═══════════════════════════════════════════════════════════
         #  4. Журнал работы
@@ -317,6 +354,60 @@ class MainTab:
 
     def _on_uri_mode_changed(self):
         pass
+
+    # ── Для Саши ──────────────────────────────────────────────
+
+    def _toggle_sasha_panel(self):
+        """Показать/скрыть панель «Для Саши»."""
+        if self._sasha_expanded:
+            self._sasha_panel.pack_forget()
+            self._sasha_toggle_btn.configure(text="◀\nД\nл\nя\n\nС\nа\nш\nи")
+            self._sasha_expanded = False
+        else:
+            self._sasha_panel.pack(side=LEFT, fill=Y, padx=(4, 0))
+            self._sasha_toggle_btn.configure(text="▶\nД\nл\nя\n\nС\nа\nш\nи")
+            self._sasha_expanded = True
+
+    def _generate_csv_for_sasha(self):
+        """Генерирует CSV файлы для Саши."""
+        if not self.controller.get_selected_files():
+            messagebox.showwarning("Предупреждение", "Не выбраны файлы для обработки!")
+            return
+
+        # Устанавливаем параметры в контроллер
+        bulletin = self.bulletin_entry.get().strip()
+        self.controller.set_bulletin(bulletin)
+        self.controller.set_mode(self.mode_var.get())
+        self.controller.set_uri_clean_mode(self.uri_clean_var.get())
+
+        # Парсим k
+        k_str = self._sasha_k_var.get().strip()
+        k_value = None
+        if k_str:
+            try:
+                k_value = int(k_str)
+            except ValueError:
+                messagebox.showwarning("Предупреждение", "Значение k должно быть целым числом!")
+                return
+
+        # Выбор директории для сохранения
+        output_dir = filedialog.askdirectory(title="Выберите папку для сохранения CSV")
+        if not output_dir:
+            return
+
+        self.log("\n" + "=" * 70)
+        self.log("ГЕНЕРАЦИЯ CSV (Для Саши)")
+        self.log("=" * 70)
+
+        success = self.controller.generate_csv_for_sasha(
+            k_value, output_dir, log_callback=self.log
+        )
+
+        if success:
+            self.log("=" * 70 + "\n")
+            messagebox.showinfo("Успех", f"CSV файлы сохранены в:\n{output_dir}")
+        else:
+            messagebox.showerror("Ошибка", "Не удалось создать CSV файлы.")
 
     def get_frame(self):
         return self.frame

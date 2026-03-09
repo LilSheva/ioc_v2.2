@@ -31,7 +31,7 @@ class MainView:
 
     def _setup_ui(self):
         """Создание элементов интерфейса."""
-        # ── Заголовок: одна строка, название слева, тоглер темы справа ──
+        # ── Заголовок: одна строка, название слева, кнопки справа ──
         header_frame = ttk.Frame(self.root, padding=(15, 10))
         header_frame.pack(fill=X, side=TOP)
 
@@ -59,8 +59,9 @@ class MainView:
             bootstyle=SECONDARY
         ).pack(side=LEFT, pady=(4, 0))
 
-        # Тоглер темы
+        # Кнопки справа: настройки ⚙ и тоглер темы
         self._is_dark = True
+
         self._theme_btn = ttk.Button(
             header_frame,
             text="☀️ Переходи на сторону добра",
@@ -68,6 +69,15 @@ class MainView:
             bootstyle="warning-outline",
         )
         self._theme_btn.pack(side=RIGHT)
+
+        self._settings_btn = ttk.Button(
+            header_frame,
+            text="⚙",
+            command=self._open_settings_dialog,
+            bootstyle="secondary-outline",
+            width=3,
+        )
+        self._settings_btn.pack(side=RIGHT, padx=(0, 8))
 
         # ── Разделитель ──
         ttk.Separator(self.root, orient=HORIZONTAL).pack(fill=X, padx=10)
@@ -77,16 +87,12 @@ class MainView:
         self.notebook.pack(fill=BOTH, expand=True, padx=10, pady=(8, 5))
 
         self.main_tab = MainTab(self.notebook, self.controller)
-        self.settings_tab = SettingsTab(self.notebook, self.controller)
         self.results_tab = ResultsTab(self.notebook, self.controller)
         self.ip_tab = IPTab(self.notebook, self.controller)
-        self.info_tab = InfoTab(self.notebook, self.controller)
 
         self.notebook.add(self.main_tab.get_frame(), text="  Главная  ")
-        self.notebook.add(self.settings_tab.get_frame(), text="  Настройка IOC  ")
         self.notebook.add(self.results_tab.get_frame(), text="  Результаты запросов  ")
         self.notebook.add(self.ip_tab.get_frame(), text="  IP управление  ")
-        self.notebook.add(self.info_tab.get_frame(), text="  Инструкция  ")
 
         # ── Футер ──
         footer_frame = ttk.Frame(self.root, padding=(15, 6))
@@ -101,15 +107,58 @@ class MainView:
             bootstyle=SECONDARY
         ).pack(side=LEFT)
 
+        # ── Кнопка "?" — инструкция в правом нижнем углу ──
+        self._info_btn = ttk.Button(
+            self.root,
+            text="?",
+            command=self._open_info_dialog,
+            bootstyle="info",
+            width=3,
+        )
+        self._info_btn.place(relx=1.0, rely=1.0, anchor="se", x=-20, y=-20)
+
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
     def _on_tab_changed(self, event):
         current_tab = self.notebook.index(self.notebook.select())
-        if current_tab == 2:
+        if current_tab == 1:
             if self.controller.get_last_query_data():
                 self.results_tab.refresh_data()
-        elif current_tab == 3:
+        elif current_tab == 2:
             self.ip_tab.refresh_data()
+
+    def _open_settings_dialog(self):
+        """Открывает настройки IOC в модальном окне."""
+        dialog = ttk.Toplevel(self.root)
+        dialog.title("Настройка IOC")
+        dialog.geometry("950x650")
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        # Центрируем относительно главного окна
+        dialog.update_idletasks()
+        x = self.root.winfo_x() + (self.root.winfo_width() - 950) // 2
+        y = self.root.winfo_y() + (self.root.winfo_height() - 650) // 2
+        dialog.geometry(f"+{x}+{y}")
+
+        settings_tab = SettingsTab(dialog, self.controller)
+        settings_tab.get_frame().pack(fill=BOTH, expand=True)
+
+    def _open_info_dialog(self):
+        """Открывает инструкцию в модальном окне."""
+        dialog = ttk.Toplevel(self.root)
+        dialog.title("Инструкция")
+        dialog.geometry("850x600")
+        dialog.transient(self.root)
+
+        # Центрируем относительно главного окна
+        dialog.update_idletasks()
+        x = self.root.winfo_x() + (self.root.winfo_width() - 850) // 2
+        y = self.root.winfo_y() + (self.root.winfo_height() - 600) // 2
+        dialog.geometry(f"+{x}+{y}")
+
+        info_tab = InfoTab(dialog, self.controller)
+        info_tab.get_frame().pack(fill=BOTH, expand=True)
 
     def _apply_rounded_styles(self):
         """Увеличенные отступы на всех виджетах — мягкий, «пухлый» вид."""
