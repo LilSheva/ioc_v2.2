@@ -139,7 +139,13 @@ class MainView:
         elif current_tab == 2:
             self.ip_tab.refresh_data()
 
-        # Обновляем стили кнопок в зависимости от текущей вкладки
+        # Скрываем вкладки настроек/инструкции когда они не активны
+        if current_tab != 3:
+            self.notebook.hide(3)
+        if current_tab != 4:
+            self.notebook.hide(4)
+
+        # Обновляем стили кнопок
         self._update_header_buttons(current_tab)
 
     def _update_header_buttons(self, current_tab):
