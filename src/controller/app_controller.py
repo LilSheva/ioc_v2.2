@@ -467,8 +467,8 @@ class AppController:
 
             # Value.csv — все хеши вместе
             value_path = os.path.join(output_dir, "Value.csv")
-            with open(value_path, 'w', newline='', encoding='utf-8') as f:
-                writer = csv.writer(f)
+            with open(value_path, 'w', newline='', encoding='utf-8-sig') as f:
+                writer = csv.writer(f, delimiter=';')
                 writer.writerow(["value", "category", "description"])
                 for h in sha256_list:
                     writer.writerow([h, "hash", description])
@@ -484,8 +484,8 @@ class AppController:
             manual_path = os.path.join(output_dir, "IOC_hash_manually.csv")
             max_len = max(len(sha256_list), len(md5_list), 1)
 
-            with open(manual_path, 'w', newline='', encoding='utf-8') as f:
-                writer = csv.writer(f)
+            with open(manual_path, 'w', newline='', encoding='utf-8-sig') as f:
+                writer = csv.writer(f, delimiter=';')
                 writer.writerow(["Number", "hash_sha256", "hash_md5", "description"])
                 for i in range(max_len):
                     if k_value is not None:
