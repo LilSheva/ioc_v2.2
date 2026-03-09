@@ -141,10 +141,10 @@ class MainTab:
         self._sasha_expanded = False
         self._sasha_toggle_btn = ttk.Button(
             params_container,
-            text="◀\nД\nл\nя\n\nС\nа\nш\nи",
+            text="◀ Для Саши",
             command=self._toggle_sasha_panel,
             bootstyle="warning-outline",
-            width=3,
+            width=14,
         )
         self._sasha_toggle_btn.pack(side=LEFT, fill=Y, padx=(4, 0))
 
@@ -167,7 +167,7 @@ class MainTab:
             command=self._generate_csv_for_sasha,
             bootstyle="warning",
         )
-        self._sasha_csv_btn.pack(fill=BOTH, expand=True, ipady=6)
+        self._sasha_csv_btn.pack(fill=X, ipady=6)
 
         # ═══════════════════════════════════════════════════════════
         #  4. Журнал работы
@@ -361,11 +361,11 @@ class MainTab:
         """Показать/скрыть панель «Для Саши»."""
         if self._sasha_expanded:
             self._sasha_panel.pack_forget()
-            self._sasha_toggle_btn.configure(text="◀\nД\nл\nя\n\nС\nа\nш\nи")
+            self._sasha_toggle_btn.configure(text="◀ Для Саши")
             self._sasha_expanded = False
         else:
             self._sasha_panel.pack(side=LEFT, fill=Y, padx=(4, 0))
-            self._sasha_toggle_btn.configure(text="▶\nД\nл\nя\n\nС\nа\nш\nи")
+            self._sasha_toggle_btn.configure(text="▶ Для Саши")
             self._sasha_expanded = True
 
     def _generate_csv_for_sasha(self):

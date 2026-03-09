@@ -59,7 +59,7 @@ class MainView:
             bootstyle=SECONDARY
         ).pack(side=LEFT, pady=(4, 0))
 
-        # Кнопки справа: настройки ⚙ и тоглер темы
+        # Кнопки справа: инструкция ?, настройки ⚙, тоглер темы
         self._is_dark = True
 
         self._theme_btn = ttk.Button(
@@ -70,14 +70,25 @@ class MainView:
         )
         self._theme_btn.pack(side=RIGHT)
 
+        # Кнопка инструкции "?"
+        self._info_btn = ttk.Button(
+            header_frame,
+            text=" ? ",
+            command=self._toggle_info_tab,
+            bootstyle="info-outline",
+            width=4,
+        )
+        self._info_btn.pack(side=RIGHT, padx=(0, 8))
+
+        # Кнопка настроек "⚙"
         self._settings_btn = ttk.Button(
             header_frame,
-            text="⚙",
-            command=self._open_settings_dialog,
-            bootstyle="secondary-outline",
-            width=3,
+            text=" ⚙ ",
+            command=self._toggle_settings_tab,
+            bootstyle="light",
+            width=4,
         )
-        self._settings_btn.pack(side=RIGHT, padx=(0, 8))
+        self._settings_btn.pack(side=RIGHT, padx=(0, 4))
 
         # ── Разделитель ──
         ttk.Separator(self.root, orient=HORIZONTAL).pack(fill=X, padx=10)
@@ -89,10 +100,21 @@ class MainView:
         self.main_tab = MainTab(self.notebook, self.controller)
         self.results_tab = ResultsTab(self.notebook, self.controller)
         self.ip_tab = IPTab(self.notebook, self.controller)
+        self.settings_tab = SettingsTab(self.notebook, self.controller)
+        self.info_tab = InfoTab(self.notebook, self.controller)
 
         self.notebook.add(self.main_tab.get_frame(), text="  Главная  ")
         self.notebook.add(self.results_tab.get_frame(), text="  Результаты запросов  ")
         self.notebook.add(self.ip_tab.get_frame(), text="  IP управление  ")
+        self.notebook.add(self.settings_tab.get_frame(), text="  Настройка IOC  ")
+        self.notebook.add(self.info_tab.get_frame(), text="  Инструкция  ")
+
+        # Скрываем вкладки настроек и инструкции из полоски табов
+        self.notebook.hide(3)  # Настройка IOC
+        self.notebook.hide(4)  # Инструкция
+
+        self._settings_visible = False
+        self._info_visible = False
 
         # ── Футер ──
         footer_frame = ttk.Frame(self.root, padding=(15, 6))
@@ -107,16 +129,6 @@ class MainView:
             bootstyle=SECONDARY
         ).pack(side=LEFT)
 
-        # ── Кнопка "?" — инструкция в правом нижнем углу ──
-        self._info_btn = ttk.Button(
-            self.root,
-            text="?",
-            command=self._open_info_dialog,
-            bootstyle="info",
-            width=3,
-        )
-        self._info_btn.place(relx=1.0, rely=1.0, anchor="se", x=-20, y=-20)
-
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
     def _on_tab_changed(self, event):
@@ -127,38 +139,52 @@ class MainView:
         elif current_tab == 2:
             self.ip_tab.refresh_data()
 
-    def _open_settings_dialog(self):
-        """Открывает настройки IOC в модальном окне."""
-        dialog = ttk.Toplevel(self.root)
-        dialog.title("Настройка IOC")
-        dialog.geometry("950x650")
-        dialog.transient(self.root)
-        dialog.grab_set()
+        # Обновляем стили кнопок в зависимости от текущей вкладки
+        self._update_header_buttons(current_tab)
 
-        # Центрируем относительно главного окна
-        dialog.update_idletasks()
-        x = self.root.winfo_x() + (self.root.winfo_width() - 950) // 2
-        y = self.root.winfo_y() + (self.root.winfo_height() - 650) // 2
-        dialog.geometry(f"+{x}+{y}")
+    def _update_header_buttons(self, current_tab):
+        """Обновляет стили кнопок настроек/инструкции."""
+        if current_tab == 3:
+            self._settings_btn.configure(bootstyle="light")
+            self._settings_visible = True
+        else:
+            self._settings_btn.configure(bootstyle="light-outline" if not self._is_dark else "light")
+            self._settings_visible = False
 
-        settings_tab = SettingsTab(dialog, self.controller)
-        settings_tab.get_frame().pack(fill=BOTH, expand=True)
+        if current_tab == 4:
+            self._info_btn.configure(bootstyle="info")
+            self._info_visible = True
+        else:
+            self._info_btn.configure(bootstyle="info-outline")
+            self._info_visible = False
 
-    def _open_info_dialog(self):
-        """Открывает инструкцию в модальном окне."""
-        dialog = ttk.Toplevel(self.root)
-        dialog.title("Инструкция")
-        dialog.geometry("850x600")
-        dialog.transient(self.root)
+    def _toggle_settings_tab(self):
+        """Переключает отображение вкладки настроек."""
+        current_tab = self.notebook.index(self.notebook.select())
+        if current_tab == 3:
+            # Уже на настройках — возвращаемся на Главную
+            self.notebook.select(0)
+            self._settings_visible = False
+            self._settings_btn.configure(bootstyle="light")
+        else:
+            # Переключаемся на настройки
+            self.notebook.select(3)
+            self._settings_visible = True
+            self._settings_btn.configure(bootstyle="light")
 
-        # Центрируем относительно главного окна
-        dialog.update_idletasks()
-        x = self.root.winfo_x() + (self.root.winfo_width() - 850) // 2
-        y = self.root.winfo_y() + (self.root.winfo_height() - 600) // 2
-        dialog.geometry(f"+{x}+{y}")
-
-        info_tab = InfoTab(dialog, self.controller)
-        info_tab.get_frame().pack(fill=BOTH, expand=True)
+    def _toggle_info_tab(self):
+        """Переключает отображение вкладки инструкции."""
+        current_tab = self.notebook.index(self.notebook.select())
+        if current_tab == 4:
+            # Уже на инструкции — возвращаемся на Главную
+            self.notebook.select(0)
+            self._info_visible = False
+            self._info_btn.configure(bootstyle="info-outline")
+        else:
+            # Переключаемся на инструкцию
+            self.notebook.select(4)
+            self._info_visible = True
+            self._info_btn.configure(bootstyle="info")
 
     def _apply_rounded_styles(self):
         """Увеличенные отступы на всех виджетах — мягкий, «пухлый» вид."""
