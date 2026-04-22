@@ -20,6 +20,8 @@ class ConfigManager:
 
     STATE_FILENAME = "ioc_parser_settings.json"
 
+    DEFAULT_API_URL = "http://localhost:8099/api/ipaddress"
+
     DEFAULT_CONFIG = [
         {
             "enabled": True,
@@ -29,6 +31,8 @@ class ConfigManager:
             "nta_status": "",
             "siem_tools_status": "---------------",
             "siem_status": "",
+            "blacklist": [],
+            "exclusions": [],
             "mp10_templates": [
                 "src.ip = \"{ioc}\"",
                 "dst.ip = \"{ioc}\""
@@ -47,6 +51,8 @@ class ConfigManager:
             "nta_status": "",
             "siem_tools_status": "---------------",
             "siem_status": "---------------",
+            "blacklist": [],
+            "exclusions": [],
             "mp10_templates": [
                 "event_src.fqdn = \"{ioc}\"",
                 "object.fullpath = \"{ioc}\"",
@@ -68,6 +74,8 @@ class ConfigManager:
             "nta_status": "",
             "siem_tools_status": "---------------",
             "siem_status": "---------------",
+            "blacklist": [],
+            "exclusions": [],
             "mp10_templates": [],
             "nad_templates": []
         },
@@ -104,6 +112,8 @@ class ConfigManager:
             "nta_status": "",
             "siem_tools_status": "---------------",
             "siem_status": "",
+            "blacklist": [],
+            "exclusions": [],
             "mp10_templates": [
                 "subject.account.contact = \"{ioc}\"",
                 "object.fullpath = \"{ioc}\""
@@ -121,6 +131,8 @@ class ConfigManager:
             "nta_status": "---------------",
             "siem_tools_status": "---------------",
             "siem_status": "",
+            "blacklist": [],
+            "exclusions": [],
             "mp10_templates": [
                 "object.hash.sha256 = \"{ioc}\""
             ],
@@ -134,6 +146,8 @@ class ConfigManager:
             "nta_status": "",
             "siem_tools_status": "---------------",
             "siem_status": "",
+            "blacklist": [],
+            "exclusions": [],
             "mp10_templates": [
                 "object.hash.md5 = \"{ioc}\""
             ],
@@ -147,6 +161,8 @@ class ConfigManager:
             "nta_status": "---------------",
             "siem_tools_status": "---------------",
             "siem_status": "",
+            "blacklist": [],
+            "exclusions": [],
             "mp10_templates": [
                 "object.hash.sha1 = \"{ioc}\""
             ],
@@ -160,25 +176,22 @@ class ConfigManager:
             "nta_status": "",
             "siem_tools_status": "---------------",
             "siem_status": "",
+            "blacklist": [],
+            "exclusions": [],
             "mp10_templates": [],
             "nad_templates": []
         }
     ]
 
     def __init__(self, state_dir: str = None):
-        """Инициализация менеджера конфигурации.
-
-        Args:
-            state_dir: Директория для файла настроек. None — используется
-                       get_application_base_path().
-        """
         self.config_data: List[Dict[str, Any]] = []
+        self.api_url: str = self.DEFAULT_API_URL
+        self.api_key: str = ""
         self._state_path = self._resolve_state_path(state_dir)
         self._load_config()
 
     @staticmethod
     def _resolve_state_path(state_dir: str = None) -> str:
-        """Определяет полный путь к файлу настроек."""
         if state_dir is None:
             base = get_application_base_path()
         else:
@@ -191,25 +204,25 @@ class ConfigManager:
         2. config.txt рядом (миграция)
         3. DEFAULT_CONFIG (в память, без записи на диск)
         """
-        # 1. Попробовать state file
         if os.path.exists(self._state_path):
             try:
                 with open(self._state_path, 'r', encoding='utf-8') as f:
                     raw = json.load(f)
-                # Поддержка {"ioc_config": [...]} и [...]
                 if isinstance(raw, dict) and 'ioc_config' in raw:
                     self.config_data = raw['ioc_config']
+                    self.api_url = raw.get('api_url', self.DEFAULT_API_URL)
+                    self.api_key = raw.get('api_key', '')
                 elif isinstance(raw, list):
                     self.config_data = raw
                 else:
                     raise ValueError("Неизвестный формат state file")
+                self._migrate_ioc_fields()
                 if self._validate_config():
                     return
                 print("Ошибка валидации state file. Загрузка умолчаний...")
             except Exception as e:
                 print(f"Ошибка загрузки state file: {e}. Загрузка умолчаний...")
 
-        # 2. Миграция с config.txt
         state_dir = os.path.dirname(self._state_path)
         legacy_path = os.path.join(state_dir, "config.txt")
         if os.path.exists(legacy_path):
@@ -218,8 +231,8 @@ class ConfigManager:
                     data = json.load(f)
                 if isinstance(data, list):
                     self.config_data = data
+                    self._migrate_ioc_fields()
                     if self._validate_config():
-                        # Миграция: записать state file
                         self.save_config()
                         print(f"Миграция config.txt -> {self.STATE_FILENAME} выполнена.")
                         return
@@ -227,15 +240,23 @@ class ConfigManager:
             except Exception as e:
                 print(f"Ошибка миграции config.txt: {e}. Загрузка умолчаний...")
 
-        # 3. Умолчания
         self._load_defaults()
 
+    def _migrate_ioc_fields(self) -> None:
+        """Добавляет отсутствующие поля blacklist/exclusions в загруженный конфиг."""
+        for item in self.config_data:
+            if not isinstance(item, dict):
+                continue
+            if item.get('name') != 'File':
+                item.setdefault('blacklist', [])
+                item.setdefault('exclusions', [])
+
     def _load_defaults(self) -> None:
-        """Загружает DEFAULT_CONFIG в память (deepcopy). Файл НЕ создаётся."""
         self.config_data = copy.deepcopy(self.DEFAULT_CONFIG)
+        self.api_url = self.DEFAULT_API_URL
+        self.api_key = ""
 
     def _validate_config(self) -> bool:
-        """Валидация структуры конфигурации."""
         if not isinstance(self.config_data, list):
             return False
 
@@ -253,11 +274,15 @@ class ConfigManager:
         return True
 
     def save_config(self) -> bool:
-        """Сохраняет текущую конфигурацию в state file."""
         try:
             with open(self._state_path, 'w', encoding='utf-8') as f:
                 json.dump(
-                    {"version": 1, "ioc_config": self.config_data},
+                    {
+                        "version": 1,
+                        "api_url": self.api_url,
+                        "api_key": self.api_key,
+                        "ioc_config": self.config_data,
+                    },
                     f, ensure_ascii=False, indent=4
                 )
             return True
@@ -266,22 +291,18 @@ class ConfigManager:
             return False
 
     def get_config(self) -> List[Dict[str, Any]]:
-        """Возвращает текущую конфигурацию."""
         return self.config_data
 
     def get_enabled_iocs(self) -> List[Dict[str, Any]]:
-        """Возвращает только включенные IOC."""
         return [ioc for ioc in self.config_data if ioc.get('enabled', False)]
 
     def update_ioc(self, index: int, updated_data: Dict[str, Any]) -> bool:
-        """Обновляет настройки IOC по индексу."""
         if 0 <= index < len(self.config_data):
             self.config_data[index].update(updated_data)
             return True
         return False
 
     def move_ioc(self, index: int, direction: int) -> bool:
-        """Перемещает IOC вверх или вниз."""
         new_index = index + direction
         if 0 <= new_index < len(self.config_data):
             self.config_data[index], self.config_data[new_index] = \
@@ -290,7 +311,6 @@ class ConfigManager:
         return False
 
     def reset_ioc_to_default(self, index: int) -> bool:
-        """Сбрасывает один IOC по name-соответствию с DEFAULT_CONFIG."""
         if not (0 <= index < len(self.config_data)):
             return False
         current_name = self.config_data[index].get('name')
@@ -301,10 +321,8 @@ class ConfigManager:
         return False
 
     def reset_all_to_defaults(self) -> None:
-        """Сбрасывает всю конфигурацию к DEFAULT_CONFIG."""
         self._load_defaults()
 
     @property
     def state_file_path(self) -> str:
-        """Путь к файлу настроек (read-only)."""
         return self._state_path

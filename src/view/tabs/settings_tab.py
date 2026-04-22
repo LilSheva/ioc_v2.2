@@ -11,7 +11,6 @@ class SettingsTab:
     """Вкладка для настройки параметров IOC V2."""
 
     def __init__(self, parent, controller):
-        """Инициализация вкладки."""
         self.controller = controller
         self.frame = ttk.Frame(parent, padding=10)
         self.ioc_widgets = []
@@ -20,7 +19,6 @@ class SettingsTab:
         self._load_config()
 
     def _setup_ui(self):
-        """Создание элементов интерфейса."""
         top_frame = ttk.Frame(self.frame)
         top_frame.pack(fill=X, pady=(0, 10))
 
@@ -40,7 +38,6 @@ class SettingsTab:
         )
         self.reset_all_btn.pack(side=LEFT, padx=(0, 10))
 
-        # Путь к файлу настроек (read-only)
         state_path = self.controller.get_state_file_path()
         path_label = ttk.Label(
             top_frame,
@@ -50,7 +47,6 @@ class SettingsTab:
         )
         path_label.pack(side=LEFT, padx=(5, 0))
 
-        # Скроллируемая область для блоков IOC
         canvas_frame = ttk.Frame(self.frame)
         canvas_frame.pack(fill=BOTH, expand=True)
 
@@ -69,36 +65,27 @@ class SettingsTab:
         self.canvas.pack(side=LEFT, fill=BOTH, expand=True)
         scrollbar.pack(side=RIGHT, fill=Y)
 
-        # Растягиваем содержимое на всю ширину canvas
         self.canvas.bind("<Configure>", self._on_canvas_configure)
-
-        # Скролл колесиком только когда курсор над этим canvas
         self.canvas.bind("<Enter>", lambda e: self.canvas.bind_all("<MouseWheel>", self._on_mousewheel))
         self.canvas.bind("<Leave>", lambda e: self.canvas.unbind_all("<MouseWheel>"))
 
     def _on_canvas_configure(self, event):
-        """Подгоняет ширину scrollable_frame под ширину canvas."""
         self.canvas.itemconfig(self._canvas_window, width=event.width)
 
     def _on_mousewheel(self, event):
-        """Обработчик прокрутки колесом мыши."""
         self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
     def _load_config(self):
-        """Загружает конфигурацию и создает блоки настроек."""
         config_data = self.controller.get_config_data()
 
-        # Очищаем предыдущие виджеты
         for widget in self.scrollable_frame.winfo_children():
             widget.destroy()
         self.ioc_widgets.clear()
 
-        # Создаем блоки для каждого IOC
         for idx, ioc_config in enumerate(config_data):
             self._create_ioc_block(idx, ioc_config)
 
     def _create_ioc_block(self, index, ioc_config):
-        """Создает блок настроек для одного IOC с редактируемыми шаблонами."""
         block_frame = ttk.LabelFrame(
             self.scrollable_frame,
             text=f"{ioc_config['name']} - {ioc_config['report_type']}",
@@ -126,54 +113,71 @@ class SettingsTab:
         priority_frame.pack(side=RIGHT)
 
         up_btn = ttk.Button(
-            priority_frame,
-            text="▲",
+            priority_frame, text="▲",
             command=lambda: self._move_ioc(index, -1),
-            bootstyle=INFO,
-            width=3
+            bootstyle=INFO, width=3
         )
         up_btn.pack(side=LEFT, padx=(0, 2))
 
         down_btn = ttk.Button(
-            priority_frame,
-            text="▼",
+            priority_frame, text="▼",
             command=lambda: self._move_ioc(index, 1),
-            bootstyle=INFO,
-            width=3
+            bootstyle=INFO, width=3
         )
         down_btn.pack(side=LEFT)
 
         reset_btn = ttk.Button(
-            priority_frame,
-            text="Сброс",
+            priority_frame, text="Сброс",
             command=lambda idx=index: self._reset_single_ioc(idx),
-            bootstyle="warning-outline",
-            width=6
+            bootstyle="warning-outline", width=6
         )
         reset_btn.pack(side=LEFT, padx=(10, 0))
 
-        # Основные поля настроек
+        # Основные поля
         fields_frame = ttk.Frame(block_frame)
         fields_frame.pack(fill=X, pady=(0, 10))
 
-        self._create_text_field(
-            fields_frame, "Тип в отчете:",
-            ioc_config.get('report_type', ''), widgets, 'report_type'
-        )
-        self._create_text_field(
-            fields_frame, "Статус NTA:",
-            ioc_config.get('nta_status', ''), widgets, 'nta_status'
-        )
-        self._create_text_field(
-            fields_frame, "Статус SIEM (Tools):",
-            ioc_config.get('siem_tools_status', ''), widgets, 'siem_tools_status'
-        )
-        self._create_text_field(
-            fields_frame, "Статус SIEM (MP):",
-            ioc_config.get('siem_status', ''), widgets, 'siem_status'
-        )
+        self._create_text_field(fields_frame, "Тип в отчете:", ioc_config.get('report_type', ''), widgets, 'report_type')
+        self._create_text_field(fields_frame, "Статус NTA:", ioc_config.get('nta_status', ''), widgets, 'nta_status')
+        self._create_text_field(fields_frame, "Статус SIEM (Tools):", ioc_config.get('siem_tools_status', ''), widgets, 'siem_tools_status')
+        self._create_text_field(fields_frame, "Статус SIEM (MP):", ioc_config.get('siem_status', ''), widgets, 'siem_status')
 
-        # --- Шаблоны MP10 ---
+        is_file = ioc_config['name'] == 'File'
+
+        # Blacklist / Exclusions
+        if is_file:
+            # Для File используем исторические поля
+            self._create_list_editor(
+                block_frame,
+                label="Исключения (точное совпадение имени файла):",
+                values=ioc_config.get('filename_exclusions', []),
+                widgets=widgets,
+                key='filename_exclusions_entries'
+            )
+            self._create_list_editor(
+                block_frame,
+                label="Исключения (слово перед «файлом»):",
+                values=ioc_config.get('file_blacklist', []),
+                widgets=widgets,
+                key='file_blacklist_entries'
+            )
+        else:
+            self._create_list_editor(
+                block_frame,
+                label="Blacklist (точное совпадение IOC — исключить):",
+                values=ioc_config.get('blacklist', []),
+                widgets=widgets,
+                key='blacklist_entries'
+            )
+            self._create_list_editor(
+                block_frame,
+                label="Exclusions (слово перед IOC — исключить):",
+                values=ioc_config.get('exclusions', []),
+                widgets=widgets,
+                key='exclusions_entries'
+            )
+
+        # Шаблоны MP10
         mp10_frame = ttk.LabelFrame(block_frame, text="Шаблоны MP10", padding=5)
         mp10_frame.pack(fill=X, pady=(0, 5))
 
@@ -186,14 +190,13 @@ class SettingsTab:
             self._add_template_row(mp10_rows_frame, tmpl, mp10_entries)
 
         add_mp10_btn = ttk.Button(
-            mp10_frame,
-            text="+ Добавить шаблон MP10",
+            mp10_frame, text="+ Добавить шаблон MP10",
             command=lambda rf=mp10_rows_frame, el=mp10_entries: self._add_template_row(rf, '', el),
             bootstyle=OUTLINE
         )
         add_mp10_btn.pack(anchor=W, pady=(5, 0))
 
-        # --- Шаблоны NAD ---
+        # Шаблоны NAD
         nad_frame = ttk.LabelFrame(block_frame, text="Шаблоны NAD", padding=5)
         nad_frame.pack(fill=X, pady=(0, 5))
 
@@ -206,8 +209,7 @@ class SettingsTab:
             self._add_template_row(nad_rows_frame, tmpl, nad_entries)
 
         add_nad_btn = ttk.Button(
-            nad_frame,
-            text="+ Добавить шаблон NAD",
+            nad_frame, text="+ Добавить шаблон NAD",
             command=lambda rf=nad_rows_frame, el=nad_entries: self._add_template_row(rf, '', el),
             bootstyle=OUTLINE
         )
@@ -215,8 +217,28 @@ class SettingsTab:
 
         self.ioc_widgets.append(widgets)
 
-    def _add_template_row(self, container, value, entries_list):
-        """Добавляет строку шаблона: Entry + кнопка удаления."""
+    def _create_list_editor(self, parent, label: str, values: list, widgets: dict, key: str):
+        """Создаёт редактируемый список строк (blacklist / exclusions)."""
+        frame = ttk.LabelFrame(parent, text=label, padding=5)
+        frame.pack(fill=X, pady=(0, 5))
+
+        rows_frame = ttk.Frame(frame)
+        rows_frame.pack(fill=X)
+
+        entries = []
+        widgets[key] = entries
+
+        for v in values:
+            self._add_list_row(rows_frame, v, entries)
+
+        add_btn = ttk.Button(
+            frame, text="+ Добавить",
+            command=lambda rf=rows_frame, el=entries: self._add_list_row(rf, '', el),
+            bootstyle="secondary-outline"
+        )
+        add_btn.pack(anchor=W, pady=(4, 0))
+
+    def _add_list_row(self, container, value: str, entries_list: list):
         row_frame = ttk.Frame(container)
         row_frame.pack(fill=X, pady=1)
 
@@ -225,24 +247,40 @@ class SettingsTab:
         entry.pack(side=LEFT, fill=X, expand=True, padx=(0, 5))
 
         del_btn = ttk.Button(
-            row_frame,
-            text="✕",
-            command=lambda rf=row_frame, e=entry, el=entries_list: self._remove_template_row(rf, e, el),
-            bootstyle="danger-outline",
-            width=3
+            row_frame, text="✕",
+            command=lambda rf=row_frame, e=entry, el=entries_list: self._remove_list_row(rf, e, el),
+            bootstyle="danger-outline", width=3
         )
         del_btn.pack(side=RIGHT)
+        entries_list.append(entry)
 
+    def _remove_list_row(self, row_frame, entry, entries_list):
+        if entry in entries_list:
+            entries_list.remove(entry)
+        row_frame.destroy()
+
+    def _add_template_row(self, container, value, entries_list):
+        row_frame = ttk.Frame(container)
+        row_frame.pack(fill=X, pady=1)
+
+        entry = ttk.Entry(row_frame)
+        entry.insert(0, value)
+        entry.pack(side=LEFT, fill=X, expand=True, padx=(0, 5))
+
+        del_btn = ttk.Button(
+            row_frame, text="✕",
+            command=lambda rf=row_frame, e=entry, el=entries_list: self._remove_template_row(rf, e, el),
+            bootstyle="danger-outline", width=3
+        )
+        del_btn.pack(side=RIGHT)
         entries_list.append(entry)
 
     def _remove_template_row(self, row_frame, entry, entries_list):
-        """Удаляет строку шаблона."""
         if entry in entries_list:
             entries_list.remove(entry)
         row_frame.destroy()
 
     def _create_text_field(self, parent, label, value, widgets_dict, key):
-        """Создает однострочное текстовое поле с меткой."""
         row_frame = ttk.Frame(parent)
         row_frame.pack(fill=X, pady=2)
 
@@ -255,23 +293,26 @@ class SettingsTab:
 
         widgets_dict[key] = entry
 
+    def _read_list_entries(self, widgets, key) -> list:
+        """Читает значения из списка Entry-виджетов, пропуская пустые."""
+        return [
+            e.get().strip()
+            for e in widgets.get(key, [])
+            if e.winfo_exists() and e.get().strip()
+        ]
+
     def _move_ioc(self, index, direction):
-        """Перемещает IOC вверх или вниз."""
         success = self.controller.move_ioc_priority(index, direction)
         if success:
             self._load_config()
         else:
-            if direction == -1:
-                messagebox.showinfo("Информация", "Этот IOC уже в начале списка.")
-            else:
-                messagebox.showinfo("Информация", "Этот IOC уже в конце списка.")
+            msg = "Этот IOC уже в начале списка." if direction == -1 else "Этот IOC уже в конце списка."
+            messagebox.showinfo("Информация", msg)
 
     def _reset_all(self):
-        """Сбрасывает все настройки IOC к значениям по умолчанию."""
         confirmed = messagebox.askyesno(
             "Сброс всех настроек",
-            "Вернуть ВСЕ настройки IOC к значениям по умолчанию?\n\n"
-            "Несохранённые изменения будут потеряны."
+            "Вернуть ВСЕ настройки IOC к значениям по умолчанию?\n\nНесохранённые изменения будут потеряны."
         )
         if not confirmed:
             return
@@ -280,15 +321,11 @@ class SettingsTab:
         messagebox.showinfo("Готово", "Все настройки сброшены к значениям по умолчанию.")
 
     def _reset_single_ioc(self, index):
-        """Сбрасывает настройки одного IOC к значениям по умолчанию."""
         config_data = self.controller.get_config_data()
         if not (0 <= index < len(config_data)):
             return
         ioc_name = config_data[index].get('name', '?')
-        confirmed = messagebox.askyesno(
-            "Сброс настроек",
-            f"Сбросить настройки «{ioc_name}» к значениям по умолчанию?"
-        )
+        confirmed = messagebox.askyesno("Сброс настроек", f"Сбросить настройки «{ioc_name}» к значениям по умолчанию?")
         if not confirmed:
             return
         success = self.controller.reset_ioc_to_default(index)
@@ -299,7 +336,6 @@ class SettingsTab:
             messagebox.showerror("Ошибка", f"Не удалось сбросить настройки «{ioc_name}».")
 
     def _save_config(self):
-        """Сохраняет все настройки IOC, включая шаблоны из виджетов."""
         try:
             updated_config = []
             current_config = self.controller.get_config_data()
@@ -307,8 +343,8 @@ class SettingsTab:
             for widget_set in self.ioc_widgets:
                 idx = widget_set['index']
                 original = current_config[idx]
+                is_file = original['name'] == 'File'
 
-                # Читаем шаблоны из Entry-виджетов
                 mp10_templates = [
                     e.get().strip()
                     for e in widget_set['mp10_template_entries']
@@ -332,10 +368,12 @@ class SettingsTab:
                     'nad_templates': nad_templates,
                 }
 
-                # Сохраняем специальные поля (file_blacklist, filename_exclusions и т.д.)
-                for key in ('file_blacklist', 'filename_exclusions'):
-                    if key in original:
-                        ioc_data[key] = original[key]
+                if is_file:
+                    ioc_data['filename_exclusions'] = self._read_list_entries(widget_set, 'filename_exclusions_entries')
+                    ioc_data['file_blacklist'] = self._read_list_entries(widget_set, 'file_blacklist_entries')
+                else:
+                    ioc_data['blacklist'] = self._read_list_entries(widget_set, 'blacklist_entries')
+                    ioc_data['exclusions'] = self._read_list_entries(widget_set, 'exclusions_entries')
 
                 updated_config.append(ioc_data)
 
@@ -350,5 +388,4 @@ class SettingsTab:
             messagebox.showerror("Ошибка", f"Произошла ошибка при сохранении:\n{str(e)}")
 
     def get_frame(self):
-        """Возвращает фрейм вкладки."""
         return self.frame

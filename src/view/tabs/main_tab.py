@@ -329,14 +329,51 @@ class MainTab:
             self.log("=" * 70 + "\n")
 
             message_parts = [
-                "Отчеты успешно созданы!",
+                "Отчёты успешно созданы!",
                 "",
-                f"  {os.path.basename(output_path)}"
+                f"  • {os.path.basename(output_path)}"
             ]
             if filters_path and os.path.exists(filters_path):
-                message_parts.append(f"  {os.path.basename(filters_path)}")
+                message_parts.append(f"  • {os.path.basename(filters_path)}")
+
+            # BDU-файл
+            bdu_data = self.controller.last_bdu_data
+            if bdu_data:
+                base_name = os.path.splitext(output_path)[0]
+                bdu_path = f"{base_name}_bdu.txt"
+                if os.path.exists(bdu_path):
+                    message_parts.append(f"  • {os.path.basename(bdu_path)} ({len(bdu_data)} BDU-идентификаторов)")
+
+            # IP на блокировку / разблокировку
+            mode = self.mode_var.get()
+            ip_block_count = 0
+            if ioc_data:
+                ip_list = ioc_data.get('IP', [])
+                for _raw, _cleaned, meta in ip_list:
+                    if mode == "fstek" or meta.get("status") == "block":
+                        ip_block_count += 1
+
+            unblock_data = self.controller.get_last_unblock_data()
+            ip_unblock_count = 0
+            if mode == "gossopka" and unblock_data:
+                ip_unblock_count = len(unblock_data.get('IP', []))
+
+            if ip_block_count > 0 or ip_unblock_count > 0:
+                message_parts.append("")
+
+            if ip_block_count > 0:
+                message_parts.append(
+                    f"⚠ Найдено {ip_block_count} IP-адресов на блокировку.\n"
+                    f"  Перейдите на вкладку «ИП управление»."
+                )
+            if ip_unblock_count > 0:
+                message_parts.append(
+                    f"ℹ Найдено {ip_unblock_count} IP-адресов на разблокировку.\n"
+                    f"  Подробнее — во вкладке «ИП управление»."
+                )
+
             message_parts.append("")
-            message_parts.append("Открыть .xlsx отчет?")
+            message_parts.append("Открыть .xlsx отчёт?")
 
             result = messagebox.askyesno("Успех", "\n".join(message_parts))
             if result:

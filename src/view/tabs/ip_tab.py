@@ -157,6 +157,17 @@ class IPTab:
         )
         section.pack(fill=X, pady=(0, 10))
 
+        # Информационное предупреждение
+        notice = ttk.Label(
+            section,
+            text="ℹ Разблокировка выполняется вручную через веб-интерфейс системы — автоматическая отправка недоступна.",
+            font=("TkDefaultFont", 9),
+            bootstyle="warning",
+            wraplength=600,
+            justify=LEFT,
+        )
+        notice.pack(anchor=W, pady=(0, 8))
+
         if not unblock_ips:
             ttk.Label(section, text="Нет IP на разблокировку").pack(anchor=W)
             return

@@ -418,6 +418,18 @@ class AppController:
         """Возвращает путь к файлу настроек."""
         return self.config_manager.state_file_path
 
+    def get_api_url(self) -> str:
+        return self.config_manager.api_url
+
+    def set_api_url(self, url: str) -> None:
+        self.config_manager.api_url = url
+
+    def get_api_key(self) -> str:
+        return self.config_manager.api_key
+
+    def set_api_key(self, key: str) -> None:
+        self.config_manager.api_key = key
+
     def _get_description(self) -> str:
         """Возвращает описание (номер бюллетеня/документа) для CSV."""
         if self.mode == "fstek":
