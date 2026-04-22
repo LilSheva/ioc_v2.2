@@ -8,6 +8,8 @@ from datetime import datetime
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 
+from . import app_log
+
 
 class ReportGenerator:
     """Генератор отчетов IOC."""
@@ -205,7 +207,7 @@ class ReportGenerator:
             return True
 
         except Exception as e:
-            print(f"Ошибка при генерации .xlsx отчета: {e}")
+            app_log.log(f"Ошибка при генерации .xlsx отчета: {e}")
             return False
 
     def generate_query_data(self, ioc_data: Dict[str, List[Tuple[str, str, dict]]]) -> List[Dict[str, Any]]:
@@ -335,8 +337,6 @@ class ReportGenerator:
         def log(message):
             if log_callback:
                 log_callback(message)
-            else:
-                print(message)
 
         try:
             sheet_mapping = {
@@ -500,7 +500,7 @@ class ReportGenerator:
             return True
 
         except Exception as e:
-            print(f"Ошибка при генерации фильтров: {e}")
+            app_log.log(f"Ошибка при генерации фильтров: {e}")
             return False
 
     @staticmethod

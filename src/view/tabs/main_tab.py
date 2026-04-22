@@ -229,6 +229,12 @@ class MainTab:
         self.log_text.pack(side=LEFT, fill=BOTH, expand=True)
         log_scrollbar.config(command=self.log_text.yview)
 
+        # Подключаем GUI-консоль как sink для служебных сообщений из модели —
+        # ранние ошибки (загрузка/миграция конфига), накопленные до готовности
+        # UI, вытекут сюда при регистрации.
+        from src.model import app_log
+        app_log.attach_ui(self.log)
+
     # ── Файлы ──────────────────────────────────────────────────
 
     def _add_files(self):

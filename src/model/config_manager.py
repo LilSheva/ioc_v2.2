@@ -13,6 +13,7 @@ import os
 from typing import List, Dict, Any
 
 from ..utils import get_application_base_path
+from . import app_log
 
 
 class ConfigManager:
@@ -219,9 +220,9 @@ class ConfigManager:
                 self._migrate_ioc_fields()
                 if self._validate_config():
                     return
-                print("Ошибка валидации state file. Загрузка умолчаний...")
+                app_log.log("Ошибка валидации state file. Загрузка умолчаний.")
             except Exception as e:
-                print(f"Ошибка загрузки state file: {e}. Загрузка умолчаний...")
+                app_log.log(f"Ошибка загрузки state file: {e}. Загрузка умолчаний.")
 
         state_dir = os.path.dirname(self._state_path)
         legacy_path = os.path.join(state_dir, "config.txt")
@@ -234,11 +235,10 @@ class ConfigManager:
                     self._migrate_ioc_fields()
                     if self._validate_config():
                         self.save_config()
-                        print(f"Миграция config.txt -> {self.STATE_FILENAME} выполнена.")
                         return
-                print("config.txt не прошёл валидацию. Загрузка умолчаний...")
+                app_log.log("config.txt не прошёл валидацию. Загрузка умолчаний.")
             except Exception as e:
-                print(f"Ошибка миграции config.txt: {e}. Загрузка умолчаний...")
+                app_log.log(f"Ошибка миграции config.txt: {e}. Загрузка умолчаний.")
 
         self._load_defaults()
 
@@ -287,7 +287,7 @@ class ConfigManager:
                 )
             return True
         except Exception as e:
-            print(f"Ошибка сохранения конфига: {e}")
+            app_log.log(f"Ошибка сохранения конфига: {e}")
             return False
 
     def get_config(self) -> List[Dict[str, Any]]:

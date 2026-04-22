@@ -430,6 +430,26 @@ class AppController:
     def set_api_key(self, key: str) -> None:
         self.config_manager.api_key = key
 
+    def send_ips_to_api(self, ip_list: list) -> dict:
+        """Отправляет список IP на API блокировки, возвращает per-IP статусы.
+
+        Возвращает dict[ip, {"status": <code>, "text": <human RU>}].
+        Если api_url/api_key не заданы — для всех IP status="NO_CONFIG".
+        """
+        from src.model.api_sender import send_to_api
+
+        api_url = (self.config_manager.api_url or "").strip()
+        api_key = (self.config_manager.api_key or "").strip()
+        if not api_url or not api_key:
+            return {ip: {"status": "NO_CONFIG", "text": "API не настроен"} for ip in ip_list}
+
+        if not ip_list:
+            return {}
+
+        source_name = self._get_description() or ""
+        _ok, per_ip = send_to_api(ip_list, source_name, api_url, api_key)
+        return per_ip
+
     def _get_description(self) -> str:
         """Возвращает описание (номер бюллетеня/документа) для CSV."""
         if self.mode == "fstek":

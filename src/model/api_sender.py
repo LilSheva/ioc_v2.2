@@ -1,9 +1,38 @@
-"""Модуль отправки IP-адресов в API системы блокировок."""
+"""Модуль отправки IP-адресов в API системы блокировок.
+
+Важно: приложение собирается в безконсольный .exe — модуль НЕ пишет в stdout.
+Все результаты возвращаются наверх в структурированном виде для показа в UI.
+"""
 
 import requests
 
 
-def send_to_api(ip_list: list, source_name: str, api_url: str, api_key: str) -> bool:
+# Человеко-читаемые тексты для известных статусов API.
+_STATUS_TEXT_RU = {
+    "OK": "Успешно",
+    "ERROR_DUPLICATE": "Уже заблокировано",
+    "ERROR_DENY_NET": "Запрещённая сеть",
+    "ERROR_FORMAT": "Ошибка формата",
+    "ERROR_INVALID": "Ошибка формата",
+}
+
+
+def _humanize(status: str, text: str) -> str:
+    if status in _STATUS_TEXT_RU:
+        return _STATUS_TEXT_RU[status]
+    if text:
+        return f"Ошибка: {text}"
+    if status:
+        return f"Ошибка: {status}"
+    return "Ошибка"
+
+
+def send_to_api(
+    ip_list: list,
+    source_name: str,
+    api_url: str,
+    api_key: str,
+) -> tuple:
     """
     Отправляет список IP-адресов в API системы блокировок.
 
@@ -14,12 +43,13 @@ def send_to_api(ip_list: list, source_name: str, api_url: str, api_key: str) -> 
         api_key:     API-ключ (заголовок X-API-KEY).
 
     Returns:
-        True если запрос выполнен (независимо от статусов отдельных IP),
-        False при ошибке соединения или других исключениях.
+        Кортеж (ok: bool, per_ip: dict[str, dict]).
+        per_ip[ip] = {"status": <code>, "text": <human-readable RU>}.
+        ok=True если HTTP-запрос выполнен успешно (отдельные IP могут иметь ошибки);
+        ok=False при сетевой ошибке/таймауте/HTTP-ошибке — тогда у всех IP общий статус ошибки.
     """
     if not ip_list:
-        print("[i] Список IP пуст — нечего отправлять.")
-        return True
+        return True, {}
 
     payload = [{"ip": ip, "comment": source_name} for ip in ip_list]
 
@@ -33,42 +63,42 @@ def send_to_api(ip_list: list, source_name: str, api_url: str, api_key: str) -> 
         response.raise_for_status()
         results = response.json()
     except requests.ConnectionError:
-        print("[-] Ошибка: сервер блокировок недоступен.")
-        return False
+        return False, {ip: {"status": "NETWORK_ERROR", "text": "Ошибка соединения"} for ip in ip_list}
     except requests.Timeout:
-        print("[-] Ошибка: превышено время ожидания ответа от сервера.")
-        return False
+        return False, {ip: {"status": "TIMEOUT", "text": "Таймаут"} for ip in ip_list}
     except requests.HTTPError as e:
-        print(f"[-] HTTP-ошибка: {e}")
-        return False
+        code = getattr(getattr(e, "response", None), "status_code", "?")
+        return False, {ip: {"status": "HTTP_ERROR", "text": f"HTTP {code}"} for ip in ip_list}
     except Exception as e:
-        print(f"[-] Неожиданная ошибка при отправке: {e}")
-        return False
+        return False, {ip: {"status": "UNEXPECTED", "text": f"Ошибка: {e.__class__.__name__}"} for ip in ip_list}
 
-    _print_results(results)
-    return True
+    per_ip = _build_per_ip(ip_list, results)
+    return True, per_ip
 
 
-def _print_results(results: list) -> None:
-    """Выводит читаемый лог по результатам API."""
+def _build_per_ip(ip_list: list, results) -> dict:
+    """Маппит ответ API в per-IP словарь с человеко-читаемыми статусами.
+
+    API возвращает список элементов вида {"id": <ip>, "status": <code>, "text": <msg>}.
+    Если формат неожиданный — все IP получают статус 'BAD_RESPONSE'.
+    """
     if not isinstance(results, list):
-        print(f"[!] Неожиданный формат ответа сервера: {results}")
-        return
+        return {ip: {"status": "BAD_RESPONSE", "text": "Неожиданный ответ сервера"} for ip in ip_list}
 
-    ok_count = 0
+    by_ip = {}
     for item in results:
-        ip = item.get("id", "?")
+        if not isinstance(item, dict):
+            continue
+        ip = item.get("id") or item.get("ip")
+        if not ip:
+            continue
         status = item.get("status", "")
         text = item.get("text", "")
+        by_ip[ip] = {"status": status, "text": _humanize(status, text)}
 
-        if status == "OK":
-            print(f"[+] Добавлено: {ip}")
-            ok_count += 1
-        elif status == "ERROR_DUPLICATE":
-            print(f"[i] Уже в базе: {ip}")
-        elif status == "ERROR_DENY_NET":
-            print(f"[!] Отклонён (внутренняя/защищённая сеть): {ip}")
-        else:
-            print(f"[-] Ошибка для {ip}: {text or status}")
+    # IP, по которым сервер не вернул ничего — помечаем явно.
+    for ip in ip_list:
+        if ip not in by_ip:
+            by_ip[ip] = {"status": "NO_RESPONSE", "text": "Нет ответа от сервера"}
 
-    print(f"\n[=] Итого добавлено: {ok_count} из {len(results)}")
+    return by_ip

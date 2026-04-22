@@ -203,7 +203,15 @@ class IOCParser:
 
                 if self.mode == "gossopka":
                     # Сначала обфусцированные
-                    email_regex_mixed = r'\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9-]+(?:(?:\.|\[\.\])[a-zA-Z0-9-]+)+\b'
+                    # Разрешаем [.] и . в local-part, чтобы поймать abc[.]qwe[.]123@mail[.]ru целиком.
+                    # \b ненадёжен на стыке ]→буква, используем явные lookaround по классу символов.
+                    email_regex_mixed = (
+                        r'(?<![A-Za-z0-9._%+\-\[\]])'
+                        r'(?:[a-zA-Z0-9_%+\-]+(?:\[\.\]|\.))*'
+                        r'[a-zA-Z0-9_%+\-]+'
+                        r'@[a-zA-Z0-9-]+(?:(?:\.|\[\.\])[a-zA-Z0-9-]+)+'
+                        r'(?![a-zA-Z0-9\-])'
+                    )
                     matches_mixed = re.findall(email_regex_mixed, working_text)
                     # Сортируем по убыванию длины — защита от порчи длинного матча коротким при str.replace
                     for match in sorted(set(matches_mixed), key=len, reverse=True):
@@ -231,8 +239,15 @@ class IOCParser:
                         email_pairs.append((match, cleaned))
                         working_text = working_text.replace(match, ' ' * len(match))
                 else:
-                    # ФСТЕК — только обфусцированные
-                    email_regex = r'\b[a-zA-Z0-9._%+-]+@(?:[a-zA-Z0-9-]+\.)*[a-zA-Z0-9-]+\[\.\][a-zA-Z]{2,}\b'
+                    # ФСТЕК — только обфусцированные.
+                    # Разрешаем [.] и . в local-part (домен обязан содержать [.]).
+                    email_regex = (
+                        r'(?<![A-Za-z0-9._%+\-\[\]])'
+                        r'(?:[a-zA-Z0-9_%+\-]+(?:\[\.\]|\.))*'
+                        r'[a-zA-Z0-9_%+\-]+'
+                        r'@(?:[a-zA-Z0-9-]+\.)*[a-zA-Z0-9-]+\[\.\][a-zA-Z]{2,}'
+                        r'(?![a-zA-Z0-9\-])'
+                    )
                     matches = re.findall(email_regex, working_text)
                     for match in sorted(set(matches), key=len, reverse=True):
                         if match not in working_text:
