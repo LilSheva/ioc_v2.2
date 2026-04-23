@@ -201,8 +201,7 @@ class IPTab:
 
     def _send_block_ips(self, block_ips):
         """Отправляет IP на блокировку через контроллер и обновляет колонку статуса."""
-        ip_values = [ip for ip, _ in block_ips]
-        if not ip_values:
+        if not block_ips:
             return
 
         # Блокируем кнопку на время запроса
@@ -211,10 +210,10 @@ class IPTab:
             self._send_button.update_idletasks()
 
         try:
-            per_ip = self.controller.send_ips_to_api(ip_values)
+            per_ip = self.controller.send_ips_to_api(block_ips)
         except Exception as e:
             per_ip = {ip: {"status": "UNEXPECTED", "text": f"Ошибка: {e.__class__.__name__}"}
-                      for ip in ip_values}
+                      for ip, _ in block_ips}
 
         # Сохраняем и отрисовываем
         self._block_send_status.update(per_ip)

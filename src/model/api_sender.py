@@ -28,17 +28,15 @@ def _humanize(status: str, text: str) -> str:
 
 
 def send_to_api(
-    ip_list: list,
-    source_name: str,
+    ip_comments: dict,
     api_url: str,
     api_key: str,
 ) -> tuple:
     """
-    Отправляет список IP-адресов в API системы блокировок.
+    Отправляет IP-адреса в API системы блокировок с per-IP комментариями.
 
     Args:
-        ip_list:     Список IP-строк для блокировки.
-        source_name: Название источника (используется в комментарии).
+        ip_comments: dict {ip: comment} — у каждого IP свой источник/коммент.
         api_url:     URL эндпоинта API.
         api_key:     API-ключ (заголовок X-API-KEY).
 
@@ -48,10 +46,11 @@ def send_to_api(
         ok=True если HTTP-запрос выполнен успешно (отдельные IP могут иметь ошибки);
         ok=False при сетевой ошибке/таймауте/HTTP-ошибке — тогда у всех IP общий статус ошибки.
     """
-    if not ip_list:
+    if not ip_comments:
         return True, {}
 
-    payload = [{"ip": ip, "comment": source_name} for ip in ip_list]
+    ip_list = list(ip_comments.keys())
+    payload = [{"ip": ip, "comment": comment} for ip, comment in ip_comments.items()]
 
     try:
         response = requests.post(

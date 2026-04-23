@@ -430,25 +430,62 @@ class AppController:
     def set_api_key(self, key: str) -> None:
         self.config_manager.api_key = key
 
-    def send_ips_to_api(self, ip_list: list) -> dict:
-        """Отправляет список IP на API блокировки, возвращает per-IP статусы.
+    def send_ips_to_api(self, ip_sources: list) -> dict:
+        """Отправляет IP на API блокировки с per-IP комментариями.
+
+        Args:
+            ip_sources: список пар (ip, filename) — каждый IP со своим исходным файлом.
 
         Возвращает dict[ip, {"status": <code>, "text": <human RU>}].
         Если api_url/api_key не заданы — для всех IP status="NO_CONFIG".
+
+        Коммент для каждого IP формируется из его filename:
+        - ФСТЭК: общий bulletin (один источник на весь отчёт);
+        - ГосСОПКА: распарсенное имя файла `{org} от {date} ({number})`,
+          fallback — сам filename без расширения.
+        При дубликатах IP (из разных файлов) побеждает первый встреченный.
         """
         from src.model.api_sender import send_to_api
 
         api_url = (self.config_manager.api_url or "").strip()
         api_key = (self.config_manager.api_key or "").strip()
-        if not api_url or not api_key:
-            return {ip: {"status": "NO_CONFIG", "text": "API не настроен"} for ip in ip_list}
+        ip_comments = self._build_ip_comments(ip_sources)
 
-        if not ip_list:
+        if not ip_comments:
             return {}
+        if not api_url or not api_key:
+            return {ip: {"status": "NO_CONFIG", "text": "API не настроен"} for ip in ip_comments}
 
-        source_name = self._get_description() or ""
-        _ok, per_ip = send_to_api(ip_list, source_name, api_url, api_key)
+        _ok, per_ip = send_to_api(ip_comments, api_url, api_key)
         return per_ip
+
+    def _build_ip_comments(self, ip_sources: list) -> dict:
+        """Строит dict[ip, comment] из пар (ip, filename) согласно режиму."""
+        ip_comments: dict = {}
+
+        if self.mode == "fstek":
+            fstec_comment = self.bulletin or self.auto_fill_bulletin() or ""
+            for ip, _filename in ip_sources:
+                ip_comments.setdefault(ip, fstec_comment)
+            return ip_comments
+
+        # ГосСОПКА — per-file парсинг
+        for ip, filename in ip_sources:
+            if ip in ip_comments:
+                continue
+            ip_comments[ip] = self._gossopka_comment_for_file(filename)
+        return ip_comments
+
+    def _gossopka_comment_for_file(self, filename: str) -> str:
+        """Формирует коммент ГосСОПКА из имени файла. Fallback — имя без .docx."""
+        if not filename:
+            return ""
+        base = os.path.basename(filename)
+        info = self.extract_gossopka_info_from_filename(base)
+        if info:
+            return f"{info['org']} от {info['date']} ({info['number']})"
+        stem, _ext = os.path.splitext(base)
+        return stem
 
     def _get_description(self) -> str:
         """Возвращает описание (номер бюллетеня/документа) для CSV."""
