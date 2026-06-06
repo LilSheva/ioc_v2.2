@@ -1,0 +1,11 @@
+{
+    "outlook_folder": "",
+    "save_dir": "C:\\ioc\\outlook_attachments",
+    "network_share_path": "C:\\ioc\\network_share",
+    "filters_template_path": "",
+    "mode": "fstek",
+    "uri_clean_mode": "domain",
+    "event_type": "Фишинговая рассылка электронной почты. Вредоносные вложения",
+    "preserve_existing_files": true,
+    "verbose": true
+}

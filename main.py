@@ -14,12 +14,23 @@ def setup_console_mode():
     if sys.stdout is None:
         sys.stdout = open(os.devnull, 'w')
     if sys.stderr is None:
+    
         sys.stderr = open(os.devnull, 'w')
 
 
 def main():
     """Главная функция приложения."""
-    # Настройка консольного режима
+    if "--server" in sys.argv:
+        try:
+            from src.controller.app_controller import AppController
+            controller = AppController()
+            controller.run_server_cycle(log_callback=print)
+        except Exception as e:
+            print(f"❌ Критическая ошибка сервера: {e}", file=sys.stderr)
+            sys.exit(1)
+        sys.exit(0)
+
+    # Настройка консольного режима для GUI
     setup_console_mode()
     
     try:
@@ -27,7 +38,7 @@ def main():
         from src.controller.app_controller import AppController
         from src.view.main_view import MainView
         # Создание контроллера
-        controller = AppController(config_path="config.txt")
+        controller = AppController()
         
         # Создание и запуск GUI
         view = MainView(controller)
@@ -49,3 +60,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

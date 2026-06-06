@@ -1,31 +1,40 @@
 """Контроллер приложения для координации между моделью и представлением."""
 
 import os
+import csv
 from typing import List, Optional, Tuple
 from ..model.config_manager import ConfigManager
 from ..model.ioc_parser_v21_fixed import IOCParser
 from ..model.report_generator import ReportGenerator
-from ..utils import get_default_filters_template_path
+from ..model.outlook_downloader import OutlookDownloader
+
 
 
 class AppController:
     """Главный контроллер приложения."""
 
-    def __init__(self, config_path: str = "config.txt"):
-        """Инициализация контроллера."""
-        self.config_manager = ConfigManager(config_path)
+    def __init__(self, config_path: str = None):
+        """Инициализация контроллера.
+
+        Args:
+            config_path: Обратная совместимость. Если передан путь к .txt —
+                         берётся его директория как state_dir. Иначе
+                         трактуется как state_dir напрямую. None — умолчание.
+        """
+        if config_path and config_path.endswith('.txt'):
+            state_dir = os.path.dirname(os.path.abspath(config_path)) or '.'
+        else:
+            state_dir = config_path
+        self.config_manager = ConfigManager(state_dir)
         self.selected_files: List[str] = []
         self.last_ioc_data = None
         self.last_query_data = None
+        self.last_bdu_data = []
+        self.last_unblock_data = {}
         self.bulletin = ""
         self.mode = "fstek"
         self.uri_clean_mode = "domain"
         self.event_type = "Фишинговая рассылка электронной почты. Вредоносные вложения"
-
-        # Путь к файлу-референсу для фильтров
-        # По умолчанию пытаемся найти в tst/
-        default_template = get_default_filters_template_path()
-        self.filters_template_path = default_template if os.path.exists(default_template) else None
     
     def get_config_data(self):
         """Возвращает текущую конфигурацию."""
@@ -85,36 +94,6 @@ class AppController:
     def get_event_type(self) -> str:
         """Возвращает текущий тип события."""
         return self.event_type
-
-    def set_filters_template_path(self, path: Optional[str]) -> None:
-        """
-        Устанавливает путь к файлу-референсу для фильтров.
-
-        Args:
-            path: Путь к .xlsx файлу-шаблону или None
-        """
-        if path and os.path.exists(path):
-            self.filters_template_path = path
-        else:
-            self.filters_template_path = None
-
-    def get_filters_template_path(self) -> Optional[str]:
-        """
-        Возвращает путь к файлу-референсу для фильтров.
-
-        Returns:
-            Путь к файлу или None если не установлен
-        """
-        return self.filters_template_path
-
-    def has_filters_template(self) -> bool:
-        """
-        Проверяет наличие файла-референса для фильтров.
-
-        Returns:
-            True если файл установлен и существует
-        """
-        return self.filters_template_path is not None and os.path.exists(self.filters_template_path)
 
     def extract_bulletin_from_filename(self, filename: str) -> Optional[str]:
         """Извлекает номер бюллетеня из имени файла (формат: XXX XX XXXX)."""
@@ -196,6 +175,141 @@ class AppController:
 
             return f"Фильтры (ГосСОПКА) {current_time}.xlsx"
 
+    def generate_report_filename(self) -> str:
+        """Генерирует имя файла отчёта в зависимости от режима."""
+        from datetime import datetime
+        current_time = datetime.now().strftime('%d.%m.%Y %H-%M')
+
+        if self.mode == "fstek":
+            bulletin = self.bulletin or self.auto_fill_bulletin() or "Без бюллетеня"
+            bulletin = bulletin.replace('/', '-')
+            return f"Отчет ({bulletin}) {current_time}.xlsx"
+
+        else:
+            info_list = []
+            for file_path in self.selected_files:
+                filename = os.path.basename(file_path)
+                info = self.extract_gossopka_info_from_filename(filename)
+                if info:
+                    info_list.append(info)
+
+            if not info_list:
+                return f"Отчет (ГосСОПКА) {current_time}.xlsx"
+
+            groups = {}
+            for info in info_list:
+                key = (info["org"], info["date"])
+                if key not in groups:
+                    groups[key] = []
+                groups[key].append(info["number"])
+
+            if groups:
+                (org, date), numbers = list(groups.items())[0]
+            return f"Отчет ({org} от {date} ({numbers_str})) {current_time}.xlsx"
+
+            return f"Отчет (ГосСОПКА) {current_time}.xlsx"
+
+    def generate_cve_filename(self) -> str:
+        """Генерирует имя файла CVE в зависимости от режима."""
+        from datetime import datetime
+        current_time = datetime.now().strftime('%d.%m.%Y %H-%M')
+
+        if self.mode == "fstek":
+            bulletin = self.bulletin or self.auto_fill_bulletin() or "Без бюллетеня"
+            bulletin = bulletin.replace('/', '-')
+            return f"CVE ({bulletin}) {current_time}.xlsx"
+
+        else:
+            info_list = []
+            for file_path in self.selected_files:
+                filename = os.path.basename(file_path)
+                info = self.extract_gossopka_info_from_filename(filename)
+                if info:
+                    info_list.append(info)
+
+            if not info_list:
+                return f"CVE (ГосСОПКА) {current_time}.xlsx"
+
+            groups = {}
+            for info in info_list:
+                key = (info["org"], info["date"])
+                if key not in groups:
+                    groups[key] = []
+                groups[key].append(info["number"])
+
+            if groups:
+                (org, date), numbers = list(groups.items())[0]
+                numbers_str = ",".join(sorted(numbers))
+                return f"CVE ({org} от {date} ({numbers_str})) {current_time}.xlsx"
+
+            return f"CVE (ГосСОПКА) {current_time}.xlsx"
+
+    def extract_date_from_doc(self, doc_text: str, filename: str) -> str:
+        """Ищет дату в формате дд.мм.гггг в имени файла или в тексте документа."""
+        import re
+        date_pattern = re.compile(r'\b(\d{2}\.\d{2}\.\d{4})\b')
+        
+        # 1. Сначала ищем в имени файла
+        match = date_pattern.search(filename)
+        if match:
+            return match.group(1)
+            
+        # 2. Ищем в тексте документа
+        match = date_pattern.search(doc_text)
+        if match:
+            return match.group(1)
+            
+        # 3. Резервный вариант — текущая дата
+        from datetime import datetime
+        return datetime.now().strftime('%d.%m.%Y')
+
+    def extract_bulletin_number(self, doc_text: str, filename: str, metadata_num: str = "") -> str:
+        """Ищет номер, начинающийся с '240 93' в тексте, имени файла или метаданных."""
+        import re
+        pattern = re.compile(r'240[\s/-]*93[\s/-]*\d+')
+        
+        # 1. Пробуем найти в метаданных (после №)
+        if metadata_num:
+            match = pattern.search(metadata_num)
+            if match:
+                return match.group(0).strip()
+                
+        # 2. Пробуем найти в имени файла
+        match = pattern.search(filename)
+        if match:
+            return match.group(0).strip()
+            
+        # 3. Пробуем найти в тексте документа
+        match = pattern.search(doc_text)
+        if match:
+            return match.group(0).strip()
+            
+        # 4. Резервный вариант
+        if metadata_num:
+            return metadata_num.strip()
+        return "240 93"
+
+    def format_received_date_ru(self, dt) -> str:
+        """Форматирует дату в формат 'д  мммм' (на русском языке в родительном падеже)."""
+        months_ru = {
+            1: "января", 2: "февраля", 3: "марта", 4: "апреля", 5: "мая", 6: "июня",
+            7: "июля", 8: "августа", 9: "сентября", 10: "октября", 11: "ноября", 12: "декабря"
+        }
+        try:
+            day = dt.day
+            month = dt.month
+            return f"{day} {months_ru[month]}"
+        except Exception:
+            try:
+                day = dt.timetuple().tm_mday
+                month = dt.timetuple().tm_mon
+                return f"{day} {months_ru[month]}"
+            except Exception:
+                from datetime import datetime
+                now = datetime.now()
+                return f"{now.day} {months_ru[now.month]}"
+
+
     def validate_files(self) -> Tuple[bool, str]:
         """Валидация выбранных файлов."""
         if not self.selected_files:
@@ -240,106 +354,334 @@ class AppController:
             # Извлекаем IOC
             log("\n📖 Чтение документов...")
             ioc_data = parser.parse(self.selected_files)
-            
+
+            # Фильтрация unblock IOC (только ГосСОПКА)
+            if self.mode == "gossopka":
+                unblock_iocs = {}
+                for ioc_type, ioc_list in ioc_data.items():
+                    unblocked = [x for x in ioc_list if x[2].get("status") == "unblock"]
+                    kept = [x for x in ioc_list if x[2].get("status") != "unblock"]
+                    if unblocked:
+                        unblock_iocs[ioc_type] = unblocked
+                    ioc_data[ioc_type] = kept
+
+                self.last_unblock_data = unblock_iocs
+
+                if unblock_iocs:
+                    total_unblock = sum(len(v) for v in unblock_iocs.values())
+                    log(f"\n⚠️ Найдено {total_unblock} IOC на РАЗБЛОКИРОВКУ (исключены из отчёта):")
+                    for ioc_type, items in unblock_iocs.items():
+                        for _, cleaned, meta in items:
+                            log(f"   🔓 [{ioc_type}] {cleaned} (файл: {meta['filename']})")
+
+            # Дедупликация по cleaned значению
+            total_before = sum(len(v) for v in ioc_data.values())
+            for ioc_type in ioc_data:
+                seen = set()
+                deduped = []
+                for item in ioc_data[ioc_type]:
+                    if item[1] not in seen:
+                        seen.add(item[1])
+                        deduped.append(item)
+                ioc_data[ioc_type] = deduped
+            total_after = sum(len(v) for v in ioc_data.values())
+
+            if total_before != total_after:
+                log(f"\n🔄 Удалено дубликатов: {total_before - total_after}")
+
             # Подсчитываем результаты
             total_iocs = sum(len(iocs) for iocs in ioc_data.values())
-            
+
             log(f"\n✨ Извлечение завершено!")
             log(f"📊 Найдено IOC по типам:")
-            
+
             for ioc_type, iocs in ioc_data.items():
-                log(f"   • {ioc_type}: {len(iocs)}")
-            
+                if iocs:
+                    if self.mode == "gossopka":
+                        blocks = sum(1 for x in iocs if x[2].get("status") == "block")
+                        searches = sum(1 for x in iocs if x[2].get("status") == "search")
+                        log(f"   • {ioc_type}: {len(iocs)} (🔒 block: {blocks}, 🔍 search: {searches})")
+                    else:
+                        log(f"   • {ioc_type}: {len(iocs)}")
+                else:
+                    log(f"   • {ioc_type}: 0")
+
             log(f"\n📈 Всего уникальных IOC: {total_iocs}")
-            
+
+            # Извлекаем BDU-идентификаторы
+            bdu_list = parser.extract_bdu_identifiers(self.selected_files)
+            if bdu_list:
+                log(f"\n📋 Найдено {len(bdu_list)} BDU-идентификаторов уязвимостей")
+                for bdu_id, fname in bdu_list:
+                    log(f"   • {bdu_id} ({fname})")
+            self.last_bdu_data = bdu_list
+
             # Сохраняем для последующего использования
             self.last_ioc_data = ioc_data
-            
+
             return True, ioc_data
             
         except Exception as e:
             log(f"\n❌ Критическая ошибка: {str(e)}")
             return False, None
     
-    def generate_reports(self, ioc_data: dict, output_xlsx_path: str, 
+    def generate_reports(self, ioc_data: dict, output_xlsx_path: str,
                         log_callback=None) -> Tuple[bool, Optional[str]]:
-        """Генерирует оба отчета (.xlsx и _queries.txt)."""
+        """Генерирует отчёт .xlsx (IOC Report) + файл фильтров."""
         def log(message):
             if log_callback:
                 log_callback(message)
-        
+
         try:
             # Проверяем наличие IOC
             if not ioc_data:
                 log("❌ Нет данных IOC для генерации отчетов.")
                 return False, None
-            
+
             total_iocs = sum(len(iocs) for iocs in ioc_data.values())
             if total_iocs == 0:
                 log("⚠️ Не найдено ни одного IOC для генерации отчетов.")
                 return False, None
-            
+
             log("\n📝 Генерация отчетов...")
-            
+
             # Создаем генератор отчетов с параметрами
             all_iocs = self.config_manager.get_enabled_iocs()
             generator = ReportGenerator(all_iocs, uri_clean_mode=self.uri_clean_mode)
 
-            # Генерируем .xlsx отчет
-            log("   • Создание .xlsx отчета (10 столбцов)...")
+            # Генерируем .xlsx отчет (IOC Report)
+            log("   • Создание .xlsx отчета...")
             xlsx_success = generator.generate_xlsx_report(
                 ioc_data, output_xlsx_path,
                 bulletin=self.bulletin,
                 mode=self.mode,
                 event_type=self.event_type
             )
-            
+
             if not xlsx_success:
                 log("❌ Ошибка при создании .xlsx отчета.")
                 return False, None
-            
+
             log(f"   ✅ .xlsx отчет сохранен: {os.path.basename(output_xlsx_path)}")
-            
-            # Генерируем .txt файл с запросами
-            base_name = os.path.splitext(output_xlsx_path)[0]
-            queries_path = f"{base_name}_queries.txt"
-            
-            log("   • Создание файла запросов (объединенные запросы)...")
-            queries_success = generator.generate_queries_report(ioc_data, queries_path)
-            
-            if not queries_success:
-                log("❌ Ошибка при создании файла запросов.")
-                return True, None
-            
-            log(f"   ✅ Файл запросов сохранен: {os.path.basename(queries_path)}")
-            
+
             # Генерируем данные запросов для GUI
             self.last_query_data = generator.generate_query_data(ioc_data)
-            
+
+            # Генерируем файл фильтров
+            filter_filename = self.generate_filters_filename()
+            filters_path = os.path.join(os.path.dirname(output_xlsx_path), filter_filename)
+            self.generate_filters_file(ioc_data, filters_path, log_callback=log_callback)
+
+            # Генерируем CVE-отчет в формате .xlsx (при наличии BDU)
+            if self.last_bdu_data:
+                cve_filename = self.generate_cve_filename()
+                cve_path = os.path.join(os.path.dirname(output_xlsx_path), cve_filename)
+                log("   • Создание отчета CVE...")
+                bdu_ids = [bdu_id for bdu_id, _ in self.last_bdu_data]
+                cve_success = generator.generate_cve_xlsx_report(bdu_ids, cve_path)
+                if cve_success:
+                    log(f"   ✅ Отчет CVE сохранен: {os.path.basename(cve_path)}")
+                else:
+                    log("   ❌ Не удалось создать отчет CVE.")
+
+            # Генерируем CSV файлы (логика "Для Саши") по умолчанию
+            output_dir = os.path.dirname(output_xlsx_path)
+            log("   • Автоматическое создание CSV шаблонов...")
+            csv_success = self.generate_csv_for_sasha(
+                ioc_data=ioc_data,
+                k_value=None,
+                output_dir=output_dir,
+                delimiter=';',
+                use_bom=True,
+                log_callback=log_callback
+            )
+            if csv_success:
+                log(f"   ✅ CSV шаблоны (Value.csv, IOC_hash_manually.csv) созданы в: {output_dir}")
+            else:
+                log("   ❌ Ошибка при создании CSV шаблонов.")
+
             log("\n🎉 Все отчеты успешно созданы!")
-            
-            return True, queries_path
-            
+
+            return True, None
+
         except Exception as e:
             log(f"\n❌ Ошибка при генерации отчетов: {str(e)}")
             return False, None
     
+    @staticmethod
+    def build_query(template, ioc_values, join_op):
+        """Обёртка для сборки запроса из шаблона и списка IOC."""
+        return ReportGenerator._build_query(template, ioc_values, join_op)
+
     def get_last_query_data(self):
         """Возвращает данные последних сгенерированных запросов."""
         return self.last_query_data
+
+    def get_last_unblock_data(self):
+        """Возвращает данные IOC на разблокировку."""
+        return self.last_unblock_data
     
     def move_ioc_priority(self, index: int, direction: int) -> bool:
         """Изменяет приоритет IOC."""
         return self.config_manager.move_ioc(index, direction)
 
-    def generate_filters_file(self, ioc_data: dict, template_path: str,
+    def reset_ioc_to_default(self, index: int) -> bool:
+        """Сбрасывает один IOC к значениям по умолчанию."""
+        return self.config_manager.reset_ioc_to_default(index)
+
+    def reset_all_to_defaults(self) -> None:
+        """Сбрасывает всю конфигурацию к умолчаниям."""
+        self.config_manager.reset_all_to_defaults()
+
+    def get_state_file_path(self) -> str:
+        """Возвращает путь к файлу настроек."""
+        return self.config_manager.state_file_path
+
+    def get_api_url(self) -> str:
+        return self.config_manager.api_url
+
+    def set_api_url(self, url: str) -> None:
+        self.config_manager.api_url = url
+
+    def get_api_key(self) -> str:
+        return self.config_manager.api_key
+
+    def set_api_key(self, key: str) -> None:
+        self.config_manager.api_key = key
+
+    def send_ips_to_api(self, ip_sources: list) -> dict:
+        """Отправляет IP на API блокировки с per-IP комментариями.
+
+        Args:
+            ip_sources: список пар (ip, filename) — каждый IP со своим исходным файлом.
+
+        Возвращает dict[ip, {"status": <code>, "text": <human RU>}].
+        Если api_url/api_key не заданы — для всех IP status="NO_CONFIG".
+
+        Коммент для каждого IP формируется из его filename:
+        - ФСТЭК: общий bulletin (один источник на весь отчёт);
+        - ГосСОПКА: распарсенное имя файла `{org} от {date} ({number})`,
+          fallback — сам filename без расширения.
+        При дубликатах IP (из разных файлов) побеждает первый встреченный.
+        """
+        from src.model.api_sender import send_to_api
+
+        api_url = (self.config_manager.api_url or "").strip()
+        api_key = (self.config_manager.api_key or "").strip()
+        ip_comments = self._build_ip_comments(ip_sources)
+
+        if not ip_comments:
+            return {}
+        if not api_url or not api_key:
+            return {ip: {"status": "NO_CONFIG", "text": "API не настроен"} for ip in ip_comments}
+
+        _ok, per_ip = send_to_api(ip_comments, api_url, api_key)
+        return per_ip
+
+    def _build_ip_comments(self, ip_sources: list) -> dict:
+        """Строит dict[ip, comment] из пар (ip, filename) согласно режиму."""
+        ip_comments: dict = {}
+
+        if self.mode == "fstek":
+            fstec_comment = self.bulletin or self.auto_fill_bulletin() or ""
+            for ip, _filename in ip_sources:
+                ip_comments.setdefault(ip, fstec_comment)
+            return ip_comments
+
+        # ГосСОПКА — per-file парсинг
+        for ip, filename in ip_sources:
+            if ip in ip_comments:
+                continue
+            ip_comments[ip] = self._gossopka_comment_for_file(filename)
+        return ip_comments
+
+    def _gossopka_comment_for_file(self, filename: str) -> str:
+        """Формирует коммент ГосСОПКА из имени файла. Fallback — имя без .docx."""
+        if not filename:
+            return ""
+        base = os.path.basename(filename)
+        info = self.extract_gossopka_info_from_filename(base)
+        if info:
+            return f"{info['org']} от {info['date']} ({info['number']})"
+        stem, _ext = os.path.splitext(base)
+        return stem
+
+    def _get_description(self) -> str:
+        """Возвращает описание (номер бюллетеня/документа) для CSV."""
+        if self.mode == "fstek":
+            return self.bulletin or self.auto_fill_bulletin() or ""
+        else:
+            for file_path in self.selected_files:
+                filename = os.path.basename(file_path)
+                info = self.extract_gossopka_info_from_filename(filename)
+                if info:
+                    return f"{info['org']} от {info['date']} ({info['number']})"
+            return ""
+
+    def generate_csv_for_sasha(self, ioc_data: dict, k_value, output_dir, delimiter=';',
+                               use_bom=True, log_callback=None) -> bool:
+        """Генерирует Value.csv и IOC_hash_manually.csv."""
+        def log(message):
+            if log_callback:
+                log_callback(message)
+
+        try:
+            log("Генерация CSV шаблонов...")
+
+            description = self._get_description()
+
+            # Собираем хеши
+            sha256_list = [item[1] for item in ioc_data.get("SHA256", [])]
+            sha1_list = [item[1] for item in ioc_data.get("SHA1", [])]
+            md5_list = [item[1] for item in ioc_data.get("MD5", [])]
+
+            # Value.csv — все хеши вместе
+            encoding = 'utf-8-sig' if use_bom else 'utf-8'
+            value_path = os.path.join(output_dir, "Value.csv")
+            with open(value_path, 'w', newline='', encoding=encoding) as f:
+                writer = csv.writer(f, delimiter=delimiter)
+                writer.writerow(["value", "category", "description"])
+                for h in sha256_list:
+                    writer.writerow([h, "hash", description])
+                for h in sha1_list:
+                    writer.writerow([h, "hash", description])
+                for h in md5_list:
+                    writer.writerow([h, "hash", description])
+
+            total_hashes = len(sha256_list) + len(sha1_list) + len(md5_list)
+            log(f"Value.csv: {total_hashes} хешей")
+
+            # IOC_hash_manually.csv — sha256 и md5 по строкам
+            manual_path = os.path.join(output_dir, "IOC_hash_manually.csv")
+            max_len = max(len(sha256_list), len(md5_list), 1)
+
+            with open(manual_path, 'w', newline='', encoding=encoding) as f:
+                writer = csv.writer(f, delimiter=delimiter)
+                writer.writerow(["Number", "hash_sha256", "hash_md5", "description"])
+                for i in range(max_len):
+                    if k_value is not None:
+                        number = k_value + i
+                    else:
+                        number = ""
+                    sha256_val = sha256_list[i] if i < len(sha256_list) else ""
+                    md5_val = md5_list[i] if i < len(md5_list) else ""
+                    writer.writerow([number, sha256_val, md5_val, description])
+
+            log(f"IOC_hash_manually.csv: {max_len} строк")
+            log("CSV файлы успешно созданы!")
+            return True
+
+        except Exception as e:
+            log(f"Ошибка при генерации CSV: {str(e)}")
+            return False
+
+    def generate_filters_file(self, ioc_data: dict,
                              output_path: str, log_callback=None) -> bool:
         """
-        Генерирует файл "Фильтры.xlsx" на основе шаблона.
+        Генерирует файл "Фильтры.xlsx" программно.
 
         Args:
             ioc_data: Данные IOC
-            template_path: Путь к шаблону
             output_path: Путь для сохранения
             log_callback: Функция для логирования
 
@@ -358,7 +700,7 @@ class AppController:
             generator = ReportGenerator(all_iocs, uri_clean_mode=self.uri_clean_mode)
 
             # Генерируем файл фильтров
-            success = generator.generate_filters_xlsx(ioc_data, template_path, output_path, log_callback=log_callback)
+            success = generator.generate_filters_xlsx(ioc_data, output_path, log_callback=log_callback)
 
             if success:
                 return True
@@ -369,3 +711,195 @@ class AppController:
         except Exception as e:
             log(f"❌ Ошибка при генерации фильтров: {str(e)}")
             return False
+
+    def run_server_cycle(self, log_callback=None) -> None:
+        """Запускает полный цикл обработки писем в фоновом/серверном режиме."""
+        def log(message):
+            if log_callback:
+                log_callback(message)
+
+        log("🚀 Запуск серверного цикла обработки почты...")
+        
+        config = self.get_config_data()
+        share_path = config.get("network_share_path", "").strip()
+        if not share_path:
+            log("❌ Ошибка: В настройках не задан network_share_path!")
+            return
+
+        if not os.path.exists(share_path):
+            try:
+                os.makedirs(share_path, exist_ok=True)
+                log(f"📁 Создана корневая папка сетевой шары: {share_path}")
+            except Exception as e:
+                log(f"❌ Ошибка создания network_share_path {share_path}: {e}")
+                return
+
+        downloader = OutlookDownloader(config)
+        email_records = downloader.download_attachments(log_callback=log_callback)
+
+        if not email_records:
+            log("💤 Нет новых непрочитанных писем для обработки.")
+            return
+
+        log(f"📦 Начинается обработка писем (всего: {len(email_records)})...")
+
+        import shutil
+        
+        for idx, record in enumerate(email_records, 1):
+            log(f"\n📧 [{idx}/{len(email_records)}] Обработка письма: '{record['subject']}'")
+            
+            # 1. Проверяем наличие слова "Бюллетень " во вложениях
+            has_bulletin_in_attachments = False
+            for att_path in record["attachments"]:
+                if "бюллетень " in os.path.basename(att_path).lower():
+                    has_bulletin_in_attachments = True
+                    break
+            
+            # Устанавливаем режим работы динамически для текущего письма
+            self.mode = "gossopka" if has_bulletin_in_attachments else "fstek"
+            
+            # 2. Читаем все .docx вложения для поиска даты, номера и "BDU:20"
+            doc_text = ""
+            metadata_num = ""
+            
+            enabled_iocs = self.config_manager.get_enabled_iocs()
+            parser = IOCParser(enabled_iocs, mode=self.mode)
+            
+            docx_paths = [p for p in record["attachments"] if p.lower().endswith('.docx')]
+            for p in docx_paths:
+                try:
+                    t = parser.extract_text_from_docx(p)
+                    doc_text += "\n" + t
+                    meta = parser.extract_metadata_from_docx(p)
+                    if meta.get("bulletin_num"):
+                        metadata_num = meta["bulletin_num"]
+                except Exception as e:
+                    log(f"   ⚠️ Ошибка чтения текста из {os.path.basename(p)}: {e}")
+
+            has_bdu_20 = "BDU:20" in doc_text
+
+            # 3. Определяем имя результирующей папки
+            if has_bulletin_in_attachments:
+                doc_date = self.extract_date_from_doc(doc_text, os.path.basename(docx_paths[0]) if docx_paths else "")
+                folder_name = f"ВЦ МЭ от {doc_date} -"
+            else:
+                first_docx_name = os.path.basename(docx_paths[0]) if docx_paths else ""
+                bulletin_num = self.extract_bulletin_number(doc_text, first_docx_name, metadata_num)
+                received_date_ru = self.format_received_date_ru(record["received_time"])
+                cve_part = " CVE" if has_bdu_20 else ""
+                folder_name = f"Меры {bulletin_num} ({received_date_ru}){cve_part} -"
+
+            # Очистим имя папки от недопустимых символов (на всякий случай)
+            import re
+            folder_name = re.sub(r'[\\/*?:"<>|]', '_', folder_name)
+            folder_dir = os.path.join(share_path, folder_name)
+            
+            task_dir = os.path.join(folder_dir, "Задача")
+            report_dir = os.path.join(folder_dir, "Отчет")
+            templates_dir = os.path.join(folder_dir, "Шаблоны IOC")
+
+            log(f"   📁 Создание структуры папок в: {folder_dir}")
+            try:
+                os.makedirs(task_dir, exist_ok=True)
+                os.makedirs(report_dir, exist_ok=True)
+                os.makedirs(templates_dir, exist_ok=True)
+            except Exception as e:
+                log(f"   ❌ Ошибка создания папок: {e}")
+                continue
+
+            # 4. Переносим файлы в "Задача"
+            moved_docx_paths = []
+            
+            if record.get("msg_path") and os.path.exists(record["msg_path"]):
+                try:
+                    shutil.move(record["msg_path"], os.path.join(task_dir, os.path.basename(record["msg_path"])))
+                except Exception as e:
+                    log(f"   ⚠️ Ошибка перемещения MSG файла: {e}")
+
+            for att_path in record["attachments"]:
+                if os.path.exists(att_path):
+                    try:
+                        dest_path = os.path.join(task_dir, os.path.basename(att_path))
+                        shutil.move(att_path, dest_path)
+                        if dest_path.lower().endswith('.docx'):
+                            moved_docx_paths.append(dest_path)
+                    except Exception as e:
+                        log(f"   ⚠️ Ошибка перемещения вложения {os.path.basename(att_path)}: {e}")
+
+            # 5. Обрабатываем извлеченные docx файлы
+            if not moved_docx_paths:
+                log("   ⚠️ В письме не найдено .docx файлов для парсинга.")
+            else:
+                self.selected_files = moved_docx_paths
+                success, ioc_data = self.process_files(log_callback=log_callback)
+                
+                if success and ioc_data:
+                    report_xlsx_path = os.path.join(report_dir, self.generate_report_filename())
+                    log(f"   📊 Генерация отчетов в: {report_dir}")
+                    rep_success, _ = self.generate_reports(ioc_data, report_xlsx_path, log_callback=log_callback)
+                    
+                    if rep_success:
+                        # Переносим сгенерированные CSV в "Шаблоны IOC"
+                        for csv_name in ["Value.csv", "IOC_hash_manually.csv"]:
+                            src_csv = os.path.join(report_dir, csv_name)
+                            if os.path.exists(src_csv):
+                                try:
+                                    shutil.move(src_csv, os.path.join(templates_dir, csv_name))
+                                except Exception as e:
+                                    log(f"   ⚠️ Ошибка перемещения {csv_name}: {e}")
+
+                        # 5.1 Автоматическая отправка IP на блокировку по API (если есть адреса)
+                        block_ips = []
+                        ip_list = ioc_data.get('IP', [])
+                        for _raw, cleaned, meta in ip_list:
+                            if self.mode == "fstek" or meta.get("status") == "block":
+                                block_ips.append((cleaned, meta.get("filename", "")))
+
+                        if block_ips:
+                            api_url = (self.config_manager.api_url or "").strip()
+                            api_key = (self.config_manager.api_key or "").strip()
+                            if api_url and api_key:
+                                log(f"   🌐 Отправка {len(block_ips)} IP-адресов на блокировку по API...")
+                                try:
+                                    per_ip = self.send_ips_to_api(block_ips)
+                                    for ip, res in per_ip.items():
+                                        log(f"      • {ip}: [{res.get('status')}] {res.get('text')}")
+                                except Exception as e:
+                                    log(f"   ❌ Ошибка при отправке IP по API: {e}")
+                            else:
+                                log("   ⚠️ Предупреждение: API блокировок не настроен (URL или ключ отсутствует). Отправка IP пропущена.")
+
+                        # 5.2 Для разблокировки: логируем предупреждение о необходимости ручной разблокировки
+                        unblock_ips = []
+                        if self.mode == "gossopka" and self.last_unblock_data:
+                            for _raw, cleaned, meta in self.last_unblock_data.get('IP', []):
+                                unblock_ips.append((cleaned, meta.get("filename", "")))
+                        if unblock_ips:
+                            doc_title = f"ВЦ МЭ от {doc_date}" if has_bulletin_in_attachments else f"Меры {bulletin_num}"
+                            log(f"\n   ⚠️ ВНИМАНИЕ: Найдено {len(unblock_ips)} IP-адресов на РАЗБЛОКИРОВКУ!")
+                            log(f"      Необходимо зайти на портал и разблокировать их вручную в соответствии с документом {doc_title}:")
+                            for ip, fname in unblock_ips:
+                                log(f"      • {ip} (из файла {fname})")
+
+                    else:
+                        log("   ❌ Не удалось сгенерировать отчеты.")
+                else:
+                    log("   ❌ Не удалось извлечь IOC.")
+
+            # 6. Помечаем письмо как прочитанное
+            try:
+                mail_item = record["mail_item"]
+                mail_item.UnRead = False
+                mail_item.Save()
+                log("   ✓ Письмо успешно помечено как прочитанное.")
+            except Exception as e:
+                log(f"   ⚠️ Не удалось пометить письмо как прочитанное: {e}")
+
+            # 7. Удаляем временную папку
+            try:
+                shutil.rmtree(record["temp_dir"])
+            except Exception as e:
+                log(f"   ⚠️ Не удалось удалить временную папку {record['temp_dir']}: {e}")
+
+        log("\n🏁 Серверный цикл обработки почты завершен.")
+

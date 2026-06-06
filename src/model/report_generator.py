@@ -8,6 +8,8 @@ from datetime import datetime
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 
+from . import app_log
+
 
 class ReportGenerator:
     """Генератор отчетов IOC."""
@@ -50,27 +52,43 @@ class ReportGenerator:
         # Режим "unique" - сокращаем до уникального префикса
         cleaned_map = {}
         for domain, uri_list in domain_groups.items():
+            # Если домен — IP-адрес, всегда сокращаем до домена
+            if self._is_ip_address(domain):
+                for uri in uri_list:
+                    cleaned_map[uri] = domain
+                continue
+
             if len(uri_list) == 1:
                 cleaned_map[uri_list[0]] = domain
             else:
+                # Сравниваем по сегментам пути, а не через startswith
+                path_segments = {}
                 for uri in uri_list:
                     try:
                         parsed = urlparse(uri if uri.startswith('http') else 'http://' + uri)
-                        path_parts = parsed.path.strip('/').split('/')
-                        cleaned = domain
-                        for i, part in enumerate(path_parts):
-                            if part:
-                                cleaned = domain + '/' + '/'.join(path_parts[:i+1])
-                                is_unique = True
-                                for other_uri in uri_list:
-                                    if other_uri != uri and other_uri.startswith(cleaned):
-                                        is_unique = False
-                                        break
-                                if is_unique:
-                                    break
-                        cleaned_map[uri] = cleaned
+                        segments = [s for s in parsed.path.strip('/').split('/') if s]
+                        path_segments[uri] = segments
                     except:
-                        cleaned_map[uri] = uri
+                        path_segments[uri] = []
+
+                for uri in uri_list:
+                    segments = path_segments[uri]
+                    if not segments:
+                        cleaned_map[uri] = domain
+                        continue
+                    # Находим минимальную глубину, отличающую от остальных
+                    cleaned = domain
+                    for depth in range(1, len(segments) + 1):
+                        prefix = '/'.join(segments[:depth])
+                        is_unique = all(
+                            other_uri == uri or
+                            '/'.join(path_segments[other_uri][:depth]) != prefix
+                            for other_uri in uri_list
+                        )
+                        if is_unique:
+                            cleaned = domain + '/' + prefix
+                            break
+                    cleaned_map[uri] = cleaned
 
         return cleaned_map
     
@@ -183,62 +201,67 @@ class ReportGenerator:
             ws.column_dimensions['G'].width = 90
             ws.column_dimensions['H'].width = 90
             ws.column_dimensions['I'].width = 30
-            ws.column_dimensions['J'].width = 64
-            
+            ws.column_dimensions['J'].width = 80
+
             wb.save(output_path)
             return True
-            
+
         except Exception as e:
-            print(f"Ошибка при генерации .xlsx отчета: {e}")
+            app_log.log(f"Ошибка при генерации .xlsx отчета: {e}")
             return False
-    
-    def generate_queries_report(self, ioc_data: Dict[str, List[Tuple[str, str, dict]]],
-                                output_path: str) -> bool:
-        """
-        Генерирует текстовый файл с объединенными поисковыми запросами.
-        """
-        try:
-            lines = ["=" * 80, "ПОИСКОВЫЕ ЗАПРОСЫ ДЛЯ IOC", "=" * 80, ""]
 
-            for ioc_config in self.ioc_config:
-                if not ioc_config.get('enabled', False):
-                    continue
-
-                name = ioc_config['name']
-                if name in ioc_data and ioc_data[name]:
-                    lines.extend([f"\n{'=' * 80}", f"--- {{{name}}} ---", f"{'=' * 80}\n"])
-
-                    cleaned_iocs = [cleaned for _, cleaned, _ in ioc_data[name]]
-                    
-                    mp10_templates = ioc_config.get('mp10_templates', [])
-                    if mp10_templates:
-                        lines.append("Для MP10")
-                        for template in mp10_templates:
-                            queries = [template.replace('{ioc}', ioc) for ioc in cleaned_iocs]
-                            lines.append(" OR ".join(queries))
-                        lines.append("")
-                    
-                    nad_templates = ioc_config.get('nad_templates', [])
-                    if nad_templates:
-                        lines.append("Для NAD")
-                        for template in nad_templates:
-                            queries = [template.replace('{ioc}', ioc) for ioc in cleaned_iocs]
-                            lines.append(" || ".join(queries))
-                        lines.append("")
-            
-            with open(output_path, 'w', encoding='utf-8') as f:
-                f.write('\n'.join(lines))
-            
-            return True
-            
-        except Exception as e:
-            print(f"Ошибка при генерации файла запросов: {e}")
-            return False
-    
     def generate_query_data(self, ioc_data: Dict[str, List[Tuple[str, str, dict]]]) -> List[Dict[str, Any]]:
         """
         Генерирует структурированные данные запросов для отображения в GUI.
+
+        URI предобрабатываются: домены → DNS, IP-адреса → IP. Отдельная группа URI не создаётся.
         """
+        # --- Предобработка URI: извлечь домены/IP, объединить с DNS/IP ---
+        merged_data: Dict[str, List[Tuple[str, str, dict]]] = {}
+        for key, items in ioc_data.items():
+            if items:
+                merged_data[key] = list(items)
+
+        if 'URI' in merged_data and merged_data['URI']:
+            uri_items = merged_data.pop('URI')
+            for original, cleaned, metadata in uri_items:
+                try:
+                    parsed = urlparse(cleaned if cleaned.startswith('http') else 'http://' + cleaned)
+                    domain = parsed.netloc or parsed.path.split('/')[0]
+                except Exception:
+                    domain = cleaned
+
+                if self._is_ip_address(domain):
+                    merged_data.setdefault('IP', []).append((original, domain, metadata))
+                else:
+                    merged_data.setdefault('DNS', []).append((original, domain, metadata))
+
+        # Дедупликация cleaned-значений внутри каждой группы
+        for key in merged_data:
+            seen = set()
+            deduped = []
+            for item in merged_data[key]:
+                if item[1] not in seen:
+                    seen.add(item[1])
+                    deduped.append(item)
+            merged_data[key] = deduped
+
+        # --- Собираем шаблоны по типам (DNS + URI шаблоны объединяются для DNS) ---
+        config_by_name = {cfg['name']: cfg for cfg in self.ioc_config if cfg.get('enabled', False)}
+
+        # Маппинг: query-группа -> список ioc_config names, из которых брать шаблоны
+        type_template_sources: Dict[str, List[str]] = {}
+        for cfg in self.ioc_config:
+            if not cfg.get('enabled', False):
+                continue
+            name = cfg['name']
+            if name == 'URI':
+                # URI шаблоны объединяются с DNS
+                type_template_sources.setdefault('DNS', []).append(name)
+            else:
+                type_template_sources.setdefault(name, []).append(name)
+
+        # --- Генерация query_data ---
         query_data = []
 
         for ioc_config in self.ioc_config:
@@ -246,40 +269,65 @@ class ReportGenerator:
                 continue
 
             name = ioc_config['name']
-            if name in ioc_data and ioc_data[name]:
-                group_queries = []
-                cleaned_iocs = [cleaned for _, cleaned, _ in ioc_data[name]]
-                
-                for template in ioc_config.get('mp10_templates', []):
-                    queries = [template.replace('{ioc}', ioc) for ioc in cleaned_iocs]
-                    group_queries.append({
-                        'ioc_name': name, 'system': 'MP10',
-                        'query': " OR ".join(queries), 'completed': False
-                    })
-                
-                for template in ioc_config.get('nad_templates', []):
-                    queries = [template.replace('{ioc}', ioc) for ioc in cleaned_iocs]
-                    group_queries.append({
-                        'ioc_name': name, 'system': 'NAD',
-                        'query': " || ".join(queries), 'completed': False
-                    })
-                
-                if group_queries:
-                    query_data.append({
-                        'group_name': f"{name} ({ioc_config['report_type']})",
-                        'queries': group_queries
-                    })
+            if name == 'URI':
+                continue  # URI не создаёт отдельную группу
+
+            if name not in merged_data or not merged_data[name]:
+                continue
+
+            cleaned_iocs = [cleaned for _, cleaned, _ in merged_data[name]]
+
+            # Собираем шаблоны из всех источников для этого типа
+            sources = type_template_sources.get(name, [name])
+            mp10_templates = []
+            nad_templates = []
+            for src_name in sources:
+                src_cfg = config_by_name.get(src_name, {})
+                mp10_templates.extend(src_cfg.get('mp10_templates', []))
+                nad_templates.extend(src_cfg.get('nad_templates', []))
+            mp10_templates = list(dict.fromkeys(mp10_templates))
+            nad_templates = list(dict.fromkeys(nad_templates))
+
+            group_queries = []
+
+            for template in mp10_templates:
+                group_queries.append({
+                    'ioc_name': name, 'system': 'MP10',
+                    'query': self._build_query(template, cleaned_iocs, " OR "),
+                    'template': template,
+                    'join_op': ' OR ',
+                    'completed': False
+                })
+
+            for template in nad_templates:
+                group_queries.append({
+                    'ioc_name': name, 'system': 'NAD',
+                    'query': self._build_query(template, cleaned_iocs, " || "),
+                    'template': template,
+                    'join_op': ' || ',
+                    'completed': False
+                })
+
+            if group_queries:
+                query_data.append({
+                    'group_name': f"{name} ({ioc_config['report_type']})",
+                    'ioc_count': len(cleaned_iocs),
+                    'cleaned_iocs': cleaned_iocs,
+                    'queries': group_queries
+                })
 
         return query_data
 
     def generate_filters_xlsx(self, ioc_data: Dict[str, List[Tuple[str, str, dict]]],
-                             template_path: str, output_path: str, log_callback=None) -> bool:
+                             output_path: str, log_callback=None) -> bool:
         """
-        Генерирует файл "Фильтры.xlsx" на основе шаблона.
+        Генерирует файл "Фильтры.xlsx" программно (без шаблона).
+
+        Создаёт листы: IP-адрес, DNS, Файл, E-mail, SHA256, SHA1, MD5.
+        Дедупликация: IP из URI попадают на лист IP-адрес, все значения уникальны.
 
         Args:
             ioc_data: Данные IOC в формате Dict[str, List[Tuple[original, cleaned, metadata]]]
-            template_path: Путь к шаблону "Фильтры (Переделанные).xlsx"
             output_path: Путь для сохранения нового файла фильтров
             log_callback: Функция для логирования (опционально)
 
@@ -289,21 +337,8 @@ class ReportGenerator:
         def log(message):
             if log_callback:
                 log_callback(message)
-            else:
-                print(message)
 
         try:
-            from openpyxl import load_workbook
-            from openpyxl.utils import get_column_letter
-            import socket
-            import warnings
-
-            warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
-
-            log(f"   • Загрузка шаблона: {template_path}")
-            wb = load_workbook(template_path)
-            log(f"   • Листы в шаблоне: {wb.sheetnames}")
-
             sheet_mapping = {
                 'IP': 'IP-адрес',
                 'DNS': 'DNS',
@@ -313,10 +348,10 @@ class ReportGenerator:
                 'SHA1': 'SHA1',
                 'MD5': 'MD5',
                 'File': 'Файл',
-                'Registry': 'Реестр'
             }
 
-            sheet_data = {}
+            # Собираем данные по листам (set для дедупликации)
+            sheet_data: Dict[str, set] = {}
 
             log(f"   • Обработка IOC данных...")
             for ioc_type, ioc_list in ioc_data.items():
@@ -352,22 +387,112 @@ class ReportGenerator:
 
                     if target_sheet:
                         if target_sheet not in sheet_data:
-                            sheet_data[target_sheet] = []
-                        sheet_data[target_sheet].append(filter_value)
+                            sheet_data[target_sheet] = set()
+                        sheet_data[target_sheet].add(filter_value)
 
             log(f"   • Распределение по листам:")
-            for sheet_name, ioc_list in sheet_data.items():
-                log(f"      - {sheet_name}: {len(ioc_list)} записей")
+            for sheet_name, ioc_set in sheet_data.items():
+                log(f"      - {sheet_name}: {len(ioc_set)} уникальных записей")
+
+            # Создаём книгу с нуля
+            sheet_order = ['IP-адрес', 'DNS', 'Файл', 'E-mail', 'SHA256', 'SHA1', 'MD5']
+            sheet_titles = {
+                'IP-адрес': 'IP',
+                'DNS': 'DNS',
+                'Файл': 'File',
+                'E-mail': 'E-mail',
+                'SHA256': 'SHA256',
+                'SHA1': 'SHA1',
+                'MD5': 'MD5',
+            }
+
+            # Собираем шаблоны запросов по листам
+            # Обратный маппинг: sheet_name -> list of ioc_config names
+            sheet_to_types: Dict[str, List[str]] = {}
+            for ioc_type, sname in sheet_mapping.items():
+                sheet_to_types.setdefault(sname, []).append(ioc_type)
+
+            sheet_templates: Dict[str, Dict[str, List[str]]] = {}  # sheet -> {mp10: [...], nad: [...]}
+            for sname, ioc_types in sheet_to_types.items():
+                mp10 = []
+                nad = []
+                for cfg in self.ioc_config:
+                    if cfg['name'] in ioc_types:
+                        mp10.extend(cfg.get('mp10_templates', []))
+                        nad.extend(cfg.get('nad_templates', []))
+                mp10 = list(dict.fromkeys(mp10))
+                nad = list(dict.fromkeys(nad))
+                sheet_templates[sname] = {'mp10': mp10, 'nad': nad}
+
+            from openpyxl.utils import get_column_letter
+
+            wb = Workbook()
+            wb.remove(wb.active)
+
+            header_font = Font(bold=True, color="FFFFFF")
+            mp10_fill = PatternFill(start_color="FF8C00", end_color="FF8C00", fill_type="solid")
+            nad_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+            title_font = Font(bold=True)
+            center_al = Alignment(horizontal="center", vertical="center")
 
             log(f"   • Запись IOC в листы...")
-            for sheet_name, ioc_list in sheet_data.items():
-                if sheet_name in wb.sheetnames:
-                    ws = wb[sheet_name]
-                    for idx, ioc in enumerate(ioc_list, start=2):
-                        ws.cell(row=idx, column=2, value=ioc)
-                    log(f"      ✓ {sheet_name}: записано {len(ioc_list)} записей")
-                else:
-                    log(f"      ✗ {sheet_name}: лист не найден в шаблоне!")
+            for sheet_name in sheet_order:
+                ws = wb.create_sheet(title=sheet_name)
+
+                tpl = sheet_templates.get(sheet_name, {})
+                mp10_tpls = tpl.get('mp10', [])
+                nad_tpls = tpl.get('nad', [])
+                mp10_count = len(mp10_tpls)
+                nad_count = len(nad_tpls)
+
+                # A1 — заголовок типа
+                ws['A1'] = sheet_titles[sheet_name]
+                ws['A1'].font = title_font
+                ws.column_dimensions['A'].width = 45
+
+                # MP10 заголовок — объединённые ячейки (оранжевый)
+                col_offset = 2  # столбец B
+                if mp10_count > 0:
+                    mp10_start = get_column_letter(col_offset)
+                    mp10_end = get_column_letter(col_offset + mp10_count - 1)
+                    if mp10_count > 1:
+                        ws.merge_cells(f'{mp10_start}1:{mp10_end}1')
+                    cell = ws.cell(row=1, column=col_offset, value='MP10')
+                    cell.font = header_font
+                    cell.fill = mp10_fill
+                    cell.alignment = center_al
+                    # Стиль для всех ячеек merged-диапазона
+                    for c in range(col_offset, col_offset + mp10_count):
+                        ws.cell(row=1, column=c).fill = mp10_fill
+                        ws.column_dimensions[get_column_letter(c)].width = 45
+
+                # NAD заголовок — объединённые ячейки (синий)
+                nad_offset = col_offset + mp10_count
+                if nad_count > 0:
+                    nad_start = get_column_letter(nad_offset)
+                    nad_end = get_column_letter(nad_offset + nad_count - 1)
+                    if nad_count > 1:
+                        ws.merge_cells(f'{nad_start}1:{nad_end}1')
+                    cell = ws.cell(row=1, column=nad_offset, value='NAD')
+                    cell.font = header_font
+                    cell.fill = nad_fill
+                    cell.alignment = center_al
+                    for c in range(nad_offset, nad_offset + nad_count):
+                        ws.cell(row=1, column=c).fill = nad_fill
+                        ws.column_dimensions[get_column_letter(c)].width = 45
+
+                # Данные: IOC в A, подставленные запросы в остальных столбцах
+                ioc_values = sorted(sheet_data.get(sheet_name, set()))
+                for idx, ioc in enumerate(ioc_values, start=2):
+                    ws.cell(row=idx, column=1, value=ioc)
+                    for ti, tmpl in enumerate(mp10_tpls):
+                        ws.cell(row=idx, column=col_offset + ti,
+                                value=tmpl.replace('{ioc}', ioc) + " OR")
+                    for ti, tmpl in enumerate(nad_tpls):
+                        ws.cell(row=idx, column=nad_offset + ti,
+                                value=tmpl.replace('{ioc}', ioc) + " ||")
+
+                log(f"      ✓ {sheet_name}: записано {len(ioc_values)} записей")
 
             log(f"   • Сохранение файла: {output_path}")
             wb.save(output_path)
@@ -375,8 +500,28 @@ class ReportGenerator:
             return True
 
         except Exception as e:
-            print(f"Ошибка при генерации фильтров: {e}")
+            app_log.log(f"Ошибка при генерации фильтров: {e}")
             return False
+
+    @staticmethod
+    def _build_query(template: str, ioc_values: List[str], join_op: str) -> str:
+        """
+        Формирует запрос из шаблона и списка IOC.
+
+        Извлекает имя поля из шаблона и формирует field in ["v1", "v2", ...].
+        """
+        # Попытка извлечь имя поля: всё до оператора перед "{ioc}"
+        m = re.match(r'^(.+?)\s*(?:={1,2}|!=|<>|CONTAINS|contains|LIKE|like|~|IN|in)\s*"\{ioc\}"$', template)
+        if not m:
+            # Мягкий fallback: всё до пробела(ов) перед "{ioc}"
+            m = re.match(r'^(.+?)\s+"\{ioc\}"$', template)
+        if m:
+            field = m.group(1).rstrip()
+            values_str = ", ".join(f'"{v}"' for v in ioc_values)
+            return f'{field} in [{values_str}]'
+        # Последний fallback — если шаблон совсем нестандартный
+        queries = [template.replace('{ioc}', ioc) for ioc in ioc_values]
+        return join_op.join(queries)
 
     def _is_ip_address(self, value: str) -> bool:
         """Проверяет, является ли строка IP-адресом."""
@@ -385,4 +530,83 @@ class ReportGenerator:
             socket.inet_aton(value)
             return True
         except:
+            return False
+
+    def generate_cve_xlsx_report(self, bdu_list: List[str], output_path: str) -> bool:
+        """
+        Генерирует Excel-таблицу для CVE/BDU с заданным форматированием.
+        """
+        try:
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "CVE"
+            
+            # Включаем сетку
+            ws.views.sheetView[0].showGridLines = True
+
+            headers = ["№", "ID ППТС", "BDU", "CVSS", "Продукт", "Ссылка"]
+            ws.append(headers)
+            
+            # Цвета
+            header_fill = PatternFill(start_color="A9A9A9", end_color="A9A9A9", fill_type="solid") # Темно-серый заголовок
+            num_fill = PatternFill(start_color="D3D3D3", end_color="D3D3D3", fill_type="solid") # Светло-серый у нумерации
+            
+            header_font = Font(bold=True)
+            num_font = Font(bold=True)
+            header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            
+            # Применяем стили к заголовкам
+            for col_num in range(1, len(headers) + 1):
+                cell = ws.cell(row=1, column=col_num)
+                cell.fill = header_fill
+                cell.font = header_font
+                cell.alignment = header_alignment
+            
+            # Заполняем данные
+            row_num = 2
+            # Если bdu_list пуст, добавим хотя бы одну пустую строку с нумерацией 1
+            list_to_write = bdu_list if bdu_list else [""]
+            for i, bdu in enumerate(list_to_write, 1):
+                row_data = [i, "", bdu, "", "", ""]
+                ws.append(row_data)
+                row_num += 1
+                
+            # Границы
+            thin_border = Border(
+                left=Side(style='thin'), right=Side(style='thin'),
+                top=Side(style='thin'), bottom=Side(style='thin')
+            )
+            center_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            left_alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+            
+            # Форматируем ячейки
+            for row in ws.iter_rows(min_row=1, max_row=row_num - 1, min_col=1, max_col=len(headers)):
+                for cell in row:
+                    cell.border = thin_border
+                    if cell.row > 1:
+                        # Нумерация
+                        if cell.column_letter == 'A':
+                            cell.fill = num_fill
+                            cell.font = num_font
+                            cell.alignment = center_alignment
+                        elif cell.column_letter in ('B', 'C', 'D'):
+                            cell.alignment = center_alignment
+                        else:
+                            cell.alignment = left_alignment
+                            
+            # Устанавливаем высоту строки заголовка
+            ws.row_dimensions[1].height = 25
+
+            # Устанавливаем ширину колонок
+            ws.column_dimensions['A'].width = 2.29
+            ws.column_dimensions['B'].width = 10.29
+            ws.column_dimensions['C'].width = 14.43
+            ws.column_dimensions['D'].width = 10.71
+            ws.column_dimensions['E'].width = 149.14
+            ws.column_dimensions['F'].width = 84.71
+            
+            wb.save(output_path)
+            return True
+        except Exception as e:
+            print(f"Ошибка при создании CVE xlsx: {e}")
             return False

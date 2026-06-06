@@ -1,263 +1,222 @@
 """Вкладка "Главная" с полями управления и логированием."""
 
+import os
 import ttkbootstrap as ttk
-from tkinter import Listbox, Scrollbar, END
 from ttkbootstrap.constants import *
 from tkinter import filedialog, messagebox
-import os
 
 
 class MainTab:
     """Вкладка для выбора файлов и запуска обработки."""
 
     def __init__(self, parent, controller):
-        """Инициализация вкладки."""
         self.controller = controller
         self.frame = ttk.Frame(parent, padding=10)
-        
         self._setup_ui()
-    
+
     def _setup_ui(self):
         """Создание элементов интерфейса."""
-        # Верхняя секция - работа с файлами
+        # ═══════════════════════════════════════════════════════════
+        #  1. Выбор файлов
+        # ═══════════════════════════════════════════════════════════
         file_frame = ttk.LabelFrame(self.frame, text="Выбор файлов", padding=10)
-        file_frame.pack(fill=BOTH, expand=False, pady=(0, 10))
-        
-        # Listbox для отображения файлов
-        list_frame = ttk.Frame(file_frame)
-        list_frame.pack(fill=BOTH, expand=True, pady=(0, 10))
-        
-        scrollbar = Scrollbar(list_frame)
-        scrollbar.pack(side=RIGHT, fill=Y)
-        
-        self.file_listbox = Listbox(
-            list_frame,
-            height=6,
-            bg='#2b3e50',
-            fg='white',
-            selectbackground='#4e73df',
-            selectforeground='white',
-            yscrollcommand=scrollbar.set,
-            borderwidth=0,
-            highlightthickness=1,
-            highlightbackground='#374850',
-            highlightcolor='#4e73df',
-            font=('Segoe UI', 10)
+        file_frame.pack(fill=X, pady=(0, 8))
+
+        # Treeview вместо Listbox — корректно работает в обеих темах
+        tree_frame = ttk.Frame(file_frame)
+        tree_frame.pack(fill=X, pady=(0, 8))
+
+        self.file_tree = ttk.Treeview(
+            tree_frame, columns=("name",), show="", height=5, selectmode="browse"
         )
-        self.file_listbox.pack(side=LEFT, fill=BOTH, expand=True)
-        scrollbar.config(command=self.file_listbox.yview)
-        
-        # Кнопки управления файлами
+        self.file_tree.column("name", stretch=True, anchor=W)
+        tree_scroll = ttk.Scrollbar(tree_frame, orient=VERTICAL, command=self.file_tree.yview)
+        self.file_tree.configure(yscrollcommand=tree_scroll.set)
+        self.file_tree.pack(side=LEFT, fill=X, expand=True)
+        tree_scroll.pack(side=RIGHT, fill=Y)
+
+        # Кнопки + счётчик
         btn_frame = ttk.Frame(file_frame)
         btn_frame.pack(fill=X)
-        
+
         self.add_files_btn = ttk.Button(
-            btn_frame,
-            text="📁 Добавить файлы...",
-            command=self._add_files,
-            bootstyle=PRIMARY
+            btn_frame, text="Добавить файлы...",
+            command=self._add_files, bootstyle=PRIMARY
         )
         self.add_files_btn.pack(side=LEFT, padx=(0, 5))
-        
+
         self.clear_files_btn = ttk.Button(
-            btn_frame,
-            text="🗑️ Очистить список",
-            command=self._clear_files,
-            bootstyle=SECONDARY
+            btn_frame, text="Очистить список",
+            command=self._clear_files, bootstyle="secondary-outline"
         )
-        self.clear_files_btn.pack(side=LEFT, padx=(0, 10))
+        self.clear_files_btn.pack(side=LEFT)
 
-        # Статус фильтров (в той же строке)
-        self.filters_status_label = ttk.Label(
-            btn_frame,
-            text="",
-            font=('Segoe UI', 8),
-            foreground='white',
-            wraplength=250
+        self.file_count_label = ttk.Label(
+            btn_frame, text="Файлов: 0", bootstyle=SECONDARY
         )
-        self.filters_status_label.pack(side=LEFT, padx=(0, 5))
+        self.file_count_label.pack(side=RIGHT, padx=(10, 0))
 
-        # Кнопка выбора файла-референса (в той же строке)
-        self.filters_btn = ttk.Button(
-            btn_frame,
-            text="🔄 Указать файл-референс",
-            command=self._select_filters_template,
-            bootstyle=DANGER
-        )
-        self.filters_btn.pack(side=LEFT)
+        # ═══════════════════════════════════════════════════════════
+        #  2. Параметры отчёта + панель «Для Саши»
+        # ═══════════════════════════════════════════════════════════
+        params_container = ttk.Frame(self.frame)
+        params_container.pack(fill=X, pady=(0, 8))
 
-        # Секция "Параметры отчета"
-        bulletin_frame = ttk.LabelFrame(self.frame, text="Параметры отчета", padding=10)
-        bulletin_frame.pack(fill=X, pady=(0, 10))
+        # Левая часть: параметры + кнопка генерации
+        left_side = ttk.Frame(params_container)
+        left_side.pack(side=LEFT, fill=BOTH, expand=True)
 
-        # Строка 1: Режим работы
-        mode_row = ttk.Frame(bulletin_frame)
-        mode_row.pack(fill=X, pady=(0, 10))
+        params_frame = ttk.LabelFrame(left_side, text="Параметры отчёта", padding=10)
+        params_frame.pack(fill=X)
 
-        ttk.Label(mode_row, text="Режим работы:", width=15).pack(side=LEFT, padx=(0, 10))
+        # Grid для ровного выравнивания меток и значений
+        params_frame.columnconfigure(1, weight=1)
 
+        # Режим работы
+        ttk.Label(
+            params_frame, text="Режим работы:", width=16, anchor=W
+        ).grid(row=0, column=0, sticky=W, padx=(0, 10), pady=3)
+
+        mode_row = ttk.Frame(params_frame)
+        mode_row.grid(row=0, column=1, sticky=W, pady=3)
         self.mode_var = ttk.StringVar(value="fstek")
 
-        mode_radio_frame = ttk.Frame(mode_row)
-        mode_radio_frame.pack(side=LEFT)
-
         ttk.Radiobutton(
-            mode_radio_frame,
-            text="ФСТЕК",
-            variable=self.mode_var,
-            value="fstek",
-            command=self._on_mode_changed,
-            bootstyle="primary"
+            mode_row, text="ФСТЕК", variable=self.mode_var,
+            value="fstek", command=self._on_mode_changed, bootstyle="primary"
         ).pack(side=LEFT, padx=(0, 15))
 
         ttk.Radiobutton(
-            mode_radio_frame,
-            text="ГосСОПКА",
-            variable=self.mode_var,
-            value="gossopka",
-            command=self._on_mode_changed,
-            bootstyle="primary"
+            mode_row, text="ГосСОПКА", variable=self.mode_var,
+            value="gossopka", command=self._on_mode_changed, bootstyle="primary"
         ).pack(side=LEFT)
 
-        # Строка 2: Режим очистки URI
-        uri_mode_row = ttk.Frame(bulletin_frame)
-        uri_mode_row.pack(fill=X, pady=(0, 10))
+        # Очистка URI
+        ttk.Label(
+            params_frame, text="Очистка URI:", width=16, anchor=W
+        ).grid(row=1, column=0, sticky=W, padx=(0, 10), pady=3)
 
-        ttk.Label(uri_mode_row, text="Очистка URI:", width=15).pack(side=LEFT, padx=(0, 10))
-
+        uri_row = ttk.Frame(params_frame)
+        uri_row.grid(row=1, column=1, sticky=W, pady=3)
         self.uri_clean_var = ttk.StringVar(value="domain")
 
-        uri_radio_frame = ttk.Frame(uri_mode_row)
-        uri_radio_frame.pack(side=LEFT)
-
         ttk.Radiobutton(
-            uri_radio_frame,
-            text="До уникального префикса",
-            variable=self.uri_clean_var,
-            value="unique",
-            command=self._on_uri_mode_changed,
-            bootstyle="info"
+            uri_row, text="До уникального префикса", variable=self.uri_clean_var,
+            value="unique", command=self._on_uri_mode_changed, bootstyle="info"
         ).pack(side=LEFT, padx=(0, 15))
 
         ttk.Radiobutton(
-            uri_radio_frame,
-            text="Только домен",
-            variable=self.uri_clean_var,
-            value="domain",
-            command=self._on_uri_mode_changed,
-            bootstyle="info"
+            uri_row, text="Только домен", variable=self.uri_clean_var,
+            value="domain", command=self._on_uri_mode_changed, bootstyle="info"
         ).pack(side=LEFT)
 
-        # Строка 3: Бюллетень (для режима ФСТЕК)
-        bulletin_row = ttk.Frame(bulletin_frame)
-        bulletin_row.pack(fill=X)
+        # Бюллетень
+        ttk.Label(
+            params_frame, text="Бюллетень:", width=16, anchor=W
+        ).grid(row=2, column=0, sticky=W, padx=(0, 10), pady=3)
 
-        self.bulletin_label = ttk.Label(bulletin_row, text="Бюллетень:", width=15)
-        self.bulletin_label.pack(side=LEFT, padx=(0, 10))
+        bulletin_row = ttk.Frame(params_frame)
+        bulletin_row.grid(row=2, column=1, sticky=EW, pady=3)
+        bulletin_row.columnconfigure(0, weight=1)
 
-        self.bulletin_entry = ttk.Entry(bulletin_row, width=50)
-        self.bulletin_entry.pack(side=LEFT, fill=X, expand=True)
+        self.bulletin_entry = ttk.Entry(bulletin_row)
+        self.bulletin_entry.grid(row=0, column=0, sticky=EW)
 
         self.bulletin_hint = ttk.Label(
-            bulletin_row,
-            text="(для режима ФСТЕК)",
-            font=('Segoe UI', 9),
-            bootstyle=SECONDARY
+            bulletin_row, text="(для режима ФСТЕК)",
+            font=("Segoe UI", 9), bootstyle=SECONDARY
         )
-        self.bulletin_hint.pack(side=LEFT, padx=(10, 0))
-        
-        # Кнопка генерации
-        generate_frame = ttk.Frame(self.frame)
-        generate_frame.pack(fill=X, pady=(0, 10))
-        
+        self.bulletin_hint.grid(row=0, column=1, padx=(10, 0))
+
+        # Кнопка генерации — на всю ширину левой части
         self.generate_btn = ttk.Button(
-            generate_frame,
-            text="⚡ Сформировать отчеты",
+            left_side,
+            text="Сформировать отчёты",
             command=self._generate_reports,
             bootstyle=SUCCESS,
-            width=30
         )
-        self.generate_btn.pack(side=RIGHT)
-        
-        # Нижняя секция - логи
+        self.generate_btn.pack(fill=X, pady=(8, 0), ipady=6)
+
+
+
+        # ═══════════════════════════════════════════════════════════
+        #  4. Журнал работы
+        # ═══════════════════════════════════════════════════════════
         log_frame = ttk.LabelFrame(self.frame, text="Журнал работы", padding=10)
         log_frame.pack(fill=BOTH, expand=True)
-        
-        # Текстовое поле для логов
+
+        # Кнопка очистки в правом верхнем углу лога
+        log_top = ttk.Frame(log_frame)
+        log_top.pack(fill=X, pady=(0, 5))
+
+        self.clear_log_btn = ttk.Button(
+            log_top, text="Очистить",
+            command=self._clear_log, bootstyle="secondary-outline"
+        )
+        self.clear_log_btn.pack(side=RIGHT)
+
+        # Текстовое поле — моноширинный шрифт
         log_text_frame = ttk.Frame(log_frame)
-        log_text_frame.pack(fill=BOTH, expand=True, pady=(0, 10))
-        
+        log_text_frame.pack(fill=BOTH, expand=True)
+
         log_scrollbar = ttk.Scrollbar(log_text_frame)
         log_scrollbar.pack(side=RIGHT, fill=Y)
-        
+
         self.log_text = ttk.Text(
-            log_text_frame,
-            height=12,
+            log_text_frame, height=10,
             yscrollcommand=log_scrollbar.set,
-            wrap=WORD,
-            state=DISABLED
+            wrap=WORD, state=DISABLED,
+            font=("Consolas", 10)
         )
         self.log_text.pack(side=LEFT, fill=BOTH, expand=True)
         log_scrollbar.config(command=self.log_text.yview)
-        
-        # Кнопка очистки логов
-        self.clear_log_btn = ttk.Button(
-            log_frame,
-            text="🧹 Очистить лог",
-            command=self._clear_log,
-            bootstyle=SECONDARY
-        )
-        self.clear_log_btn.pack()
 
-        # Обновляем статус фильтров при инициализации
-        self._update_filters_status()
-    
+        # Подключаем GUI-консоль как sink для служебных сообщений из модели —
+        # ранние ошибки (загрузка/миграция конфига), накопленные до готовности
+        # UI, вытекут сюда при регистрации.
+        from src.model import app_log
+        app_log.attach_ui(self.log)
+
+    # ── Файлы ──────────────────────────────────────────────────
+
     def _add_files(self):
-        """Обработчик добавления файлов."""
         file_paths = filedialog.askopenfilenames(
             title="Выберите .docx файлы",
             filetypes=[("Word Documents", "*.docx"), ("All Files", "*.*")]
         )
-
         if file_paths:
             added = self.controller.add_files(list(file_paths))
             self._update_file_list()
-            self.log(f"✅ Добавлено файлов: {added}")
+            self.log(f"Добавлено файлов: {added}")
 
             if self.mode_var.get() == "fstek":
                 auto_bulletin = self.controller.auto_fill_bulletin()
                 if auto_bulletin:
                     self.bulletin_entry.delete(0, END)
                     self.bulletin_entry.insert(0, auto_bulletin)
-                    self.log(f"📋 Бюллетень определен автоматически: {auto_bulletin}")
-    
+                    self.log(f"Бюллетень определен автоматически: {auto_bulletin}")
+
     def _clear_files(self):
-        """Обработчик очистки списка файлов."""
-        if self.file_listbox.size() > 0:
-            confirm = messagebox.askyesno(
-                "Подтверждение",
-                "Очистить список выбранных файлов?"
-            )
+        if len(self.file_tree.get_children()) > 0:
+            confirm = messagebox.askyesno("Подтверждение", "Очистить список выбранных файлов?")
             if confirm:
                 self.controller.clear_files()
                 self._update_file_list()
-
                 if self.mode_var.get() == "fstek":
                     self.bulletin_entry.delete(0, END)
+                self.log("Список файлов очищен.")
 
-                self.log("🗑️ Список файлов очищен.")
-    
     def _update_file_list(self):
-        """Обновляет отображение списка файлов."""
-        self.file_listbox.delete(0, END)
+        for item in self.file_tree.get_children():
+            self.file_tree.delete(item)
         files = self.controller.get_selected_files()
-        
         for file_path in files:
-            display_name = os.path.basename(file_path)
-            self.file_listbox.insert(END, display_name)
-    
+            self.file_tree.insert("", END, values=(os.path.basename(file_path),))
+        self.file_count_label.configure(text=f"Файлов: {len(files)}")
+
+    # ── Генерация ──────────────────────────────────────────────
+
     def _generate_reports(self):
-        """Обработчик генерации отчетов."""
         if not self.controller.get_selected_files():
             messagebox.showwarning("Предупреждение", "Не выбраны файлы для обработки!")
             return
@@ -271,36 +230,28 @@ class MainTab:
         uri_clean_mode = self.uri_clean_var.get()
         self.controller.set_uri_clean_mode(uri_clean_mode)
 
-        self.log("\n" + "=" * 80)
-        self.log("🚀 ЗАПУСК ОБРАБОТКИ")
-        self.log("=" * 80)
-        self.log(f"⚙️ Режим работы: {mode.upper()}")
-        self.log(f"🔗 Очистка URI: {'До уникального префикса' if uri_clean_mode == 'unique' else 'Только домен'}")
+        self.log("\n" + "=" * 70)
+        self.log("ЗАПУСК ОБРАБОТКИ")
+        self.log("=" * 70)
+        self.log(f"Режим: {mode.upper()}")
+        self.log(f"Очистка URI: {'уникальный префикс' if uri_clean_mode == 'unique' else 'только домен'}")
         if mode == "fstek" and bulletin:
-            self.log(f"📋 Бюллетень: {bulletin}")
+            self.log(f"Бюллетень: {bulletin}")
 
         success, ioc_data = self.controller.process_files(log_callback=self.log)
 
         if not success or not ioc_data:
-            self.log("\n❌ Обработка завершилась с ошибкой.")
+            self.log("\nОбработка завершилась с ошибкой.")
             messagebox.showerror("Ошибка", "Не удалось извлечь IOC из файлов.")
             return
 
         total_iocs = sum(len(iocs) for iocs in ioc_data.values())
         if total_iocs == 0:
-            self.log("\n⚠️ В документах не найдено ни одного IOC.")
+            self.log("\nВ документах не найдено ни одного IOC.")
             messagebox.showinfo("Информация", "В выбранных документах не найдено ни одного IOC.")
             return
 
-        selected_files = self.controller.get_selected_files()
-        if len(selected_files) == 1:
-            input_filename = os.path.splitext(os.path.basename(selected_files[0]))[0]
-        else:
-            input_filename = "multiple_files"
-
-        from datetime import datetime
-        current_time = datetime.now().strftime('%d-%m-%y-%H-%M')
-        default_filename = f"ioc_report_{input_filename}_{current_time}.xlsx"
+        default_filename = self.controller.generate_report_filename()
 
         output_path = filedialog.asksaveasfilename(
             title="Сохранить отчет как...",
@@ -310,83 +261,102 @@ class MainTab:
         )
 
         if not output_path:
-            self.log("\n⚠️ Сохранение отменено пользователем.")
+            self.log("\nСохранение отменено пользователем.")
             return
 
-        success, queries_path = self.controller.generate_reports(
-            ioc_data,
-            output_path,
-            log_callback=self.log
+        success, _ = self.controller.generate_reports(
+            ioc_data, output_path, log_callback=self.log
         )
 
-        filters_path = None
-        # Используем путь к референсу из контроллера
-        if self.controller.has_filters_template():
-            template_path = self.controller.get_filters_template_path()
-            filter_filename = self.controller.generate_filters_filename()
-            filters_path = os.path.join(os.path.dirname(output_path), filter_filename)
-
-            self.controller.generate_filters_file(
-                ioc_data,
-                template_path,
-                filters_path,
-                log_callback=self.log
-            )
+        filter_filename = self.controller.generate_filters_filename()
+        filters_path = os.path.join(os.path.dirname(output_path), filter_filename)
 
         if success:
-            self.log("\n" + "=" * 80)
-            self.log("✅ ОБРАБОТКА ЗАВЕРШЕНА УСПЕШНО")
-            self.log("=" * 80 + "\n")
+            self.log("\n" + "=" * 70)
+            self.log("ОБРАБОТКА ЗАВЕРШЕНА УСПЕШНО")
+            self.log("=" * 70 + "\n")
 
             message_parts = [
-                "Отчеты успешно созданы!",
+                "Отчёты успешно созданы!",
                 "",
-                f"📊 {os.path.basename(output_path)}",
-                f"📝 {os.path.basename(queries_path) if queries_path else 'N/A'}"
+                f"  • {os.path.basename(output_path)}"
             ]
             if filters_path and os.path.exists(filters_path):
-                message_parts.append(f"🔍 {os.path.basename(filters_path)}")
-            message_parts.append("")
-            message_parts.append("Открыть .xlsx отчет?")
+                message_parts.append(f"  • {os.path.basename(filters_path)}")
 
-            result = messagebox.askyesno(
-                "Успех",
-                "\n".join(message_parts)
-            )
-            
+            # BDU-файл
+            bdu_data = self.controller.last_bdu_data
+            if bdu_data:
+                base_name = os.path.splitext(output_path)[0]
+                bdu_path = f"{base_name}_bdu.txt"
+                if os.path.exists(bdu_path):
+                    message_parts.append(f"  • {os.path.basename(bdu_path)} ({len(bdu_data)} BDU-идентификаторов)")
+
+            # IP на блокировку / разблокировку
+            mode = self.mode_var.get()
+            ip_block_count = 0
+            if ioc_data:
+                ip_list = ioc_data.get('IP', [])
+                for _raw, _cleaned, meta in ip_list:
+                    if mode == "fstek" or meta.get("status") == "block":
+                        ip_block_count += 1
+
+            unblock_data = self.controller.get_last_unblock_data()
+            ip_unblock_count = 0
+            if mode == "gossopka" and unblock_data:
+                ip_unblock_count = len(unblock_data.get('IP', []))
+
+            if ip_block_count > 0 or ip_unblock_count > 0:
+                message_parts.append("")
+
+            if ip_block_count > 0:
+                message_parts.append(
+                    f"⚠ Найдено {ip_block_count} IP-адресов на блокировку.\n"
+                    f"  Перейдите на вкладку «ИП управление»."
+                )
+            if ip_unblock_count > 0:
+                message_parts.append(
+                    f"ℹ Найдено {ip_unblock_count} IP-адресов на разблокировку.\n"
+                    f"  Подробнее — во вкладке «ИП управление»."
+                )
+
+            message_parts.append("")
+            message_parts.append("Открыть .xlsx отчёт?")
+
+            result = messagebox.askyesno("Успех", "\n".join(message_parts))
             if result:
                 try:
                     os.startfile(output_path)
-                except:
+                except Exception:
                     import subprocess
                     try:
                         subprocess.run(['xdg-open', output_path])
-                    except:
-                        self.log("⚠️ Не удалось автоматически открыть файл.")
+                    except Exception:
+                        self.log("Не удалось автоматически открыть файл.")
         else:
             messagebox.showerror("Ошибка", "Произошла ошибка при генерации отчетов.")
-    
+
+    # ── Лог ────────────────────────────────────────────────────
+
     def _clear_log(self):
-        """Очищает текстовое поле логов."""
         self.log_text.config(state=NORMAL)
         self.log_text.delete(1.0, END)
         self.log_text.config(state=DISABLED)
-    
+
     def log(self, message):
-        """Добавляет сообщение в лог."""
         self.log_text.config(state=NORMAL)
         self.log_text.insert(END, message + "\n")
         self.log_text.see(END)
         self.log_text.config(state=DISABLED)
         self.log_text.update_idletasks()
 
+    # ── Обработчики ────────────────────────────────────────────
+
     def _on_mode_changed(self):
-        """Обработчик изменения режима работы."""
         mode = self.mode_var.get()
         if mode == "fstek":
             self.bulletin_hint.config(text="(автозаполнение или ввод вручную)")
             self.bulletin_entry.config(state=NORMAL)
-
             if self.controller.get_selected_files():
                 auto_bulletin = self.controller.auto_fill_bulletin()
                 if auto_bulletin:
@@ -396,50 +366,9 @@ class MainTab:
             self.bulletin_hint.config(text="(игнорируется в режиме ГосСОПКА)")
 
     def _on_uri_mode_changed(self):
-        """Обработчик изменения режима очистки URI."""
         pass
 
-    def _update_filters_status(self):
-        """Обновляет статус отображения файла-референса для фильтров."""
-        has_template = self.controller.has_filters_template()
 
-        if has_template:
-            template_path = self.controller.get_filters_template_path()
-            filename = os.path.basename(template_path) if template_path else "файл"
-            self.filters_status_label.config(
-                text=f"✅ Фильтры найдены:\n{filename}"
-            )
-            self.filters_btn.config(
-                text="🔄 Поменять файл-референс",
-                bootstyle=SUCCESS
-            )
-        else:
-            self.filters_status_label.config(
-                text="❌ Фильтры не найдены.\nМожете указать где они"
-            )
-            self.filters_btn.config(
-                text="🔄 Указать файл-референс",
-                bootstyle=DANGER
-            )
-
-    def _select_filters_template(self):
-        """Обработчик выбора файла-референса для фильтров."""
-        file_path = filedialog.askopenfilename(
-            title="Выберите файл-шаблон фильтров",
-            filetypes=[("Excel Files", "*.xlsx"), ("All Files", "*.*")],
-            initialfile="Фильтры (Переделанные).xlsx"
-        )
-
-        if file_path:
-            self.controller.set_filters_template_path(file_path)
-            self._update_filters_status()
-
-            if self.controller.has_filters_template():
-                self.log(f"Файл-референс для фильтров установлен: {os.path.basename(file_path)}")
-            else:
-                self.log("Ошибка: выбранный файл не существует.")
-                messagebox.showerror("Ошибка", "Выбранный файл не существует.")
 
     def get_frame(self):
-        """Возвращает фрейм вкладки."""
         return self.frame

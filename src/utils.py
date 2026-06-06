@@ -24,12 +24,3 @@ def get_application_base_path():
         return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def get_default_filters_template_path():
-    """
-    Возвращает путь к файлу-шаблону фильтров по умолчанию.
-
-    Returns:
-        str: Путь к файлу "Фильтры (Переделанные).xlsx" в папке tst/
-    """
-    base_path = get_application_base_path()
-    return os.path.join(base_path, "tst", "Фильтры (Переделанные).xlsx")
