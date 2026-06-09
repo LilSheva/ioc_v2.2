@@ -9,6 +9,8 @@
     "password_env_var": "EWS_PASSWORD",
     "ews_email": "user@domain.com",
     "ews_server": "mail.domain.com",
+    "ews_port": 443,
+    "ews_verify_ssl": false,
     "ews_username": "domain\\user",
     
     "api_url": "http://localhost:8099/api/ipaddress",

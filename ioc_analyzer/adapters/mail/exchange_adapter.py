@@ -10,6 +10,8 @@ from datetime import datetime
 
 
 from exchangelib import Account, Configuration, Credentials, DELEGATE, FileAttachment
+from exchangelib.protocol import BaseProtocol, NoVerifyHTTPAdapter
+
 from ioc_analyzer.core.credentials import resolve_secret
 from ioc_analyzer.core.models import EmailRecord
 from ioc_analyzer.ports.mail_port import MailPort
@@ -17,14 +19,49 @@ from ioc_analyzer.ports.mail_port import MailPort
 logger = logging.getLogger("ioc_analyzer.mail_adapter")
 
 
-def _normalize_ews_server(server: str) -> str:
-    """Убирает схему https:// — exchangelib ожидает только hostname."""
+def _normalize_ews_server(server: str) -> tuple[str, int | None]:
+    """
+    Убирает схему https:// и отделяет порт, если он указан в server.
+
+    Returns:
+        (hostname, port_or_none)
+    """
     host = (server or "").strip()
     if host.lower().startswith("https://"):
         host = host[8:]
     elif host.lower().startswith("http://"):
         host = host[7:]
-    return host.strip("/")
+    host = host.strip("/")
+
+    explicit_port: int | None = None
+    if ":" in host:
+        hostname, _, port_part = host.rpartition(":")
+        if port_part.isdigit():
+            host = hostname
+            explicit_port = int(port_part)
+    return host, explicit_port
+
+
+def _configure_ssl_verification(verify_ssl: bool) -> None:
+    """Отключает проверку сертификата для внутреннего Exchange (самоподписанный CA)."""
+    if verify_ssl:
+        return
+    BaseProtocol.HTTP_ADAPTER_CLS = NoVerifyHTTPAdapter
+    logger.warning(
+        "Проверка SSL-сертификата EWS отключена (ews_verify_ssl=false). "
+        "Используйте только в доверенной корпоративной сети."
+    )
+
+
+def _build_configuration(
+    host: str,
+    port: int,
+    credentials: Credentials,
+) -> Configuration:
+    if port != 443:
+        endpoint = f"https://{host}:{port}/EWS/Exchange.asmx"
+        return Configuration(service_endpoint=endpoint, credentials=credentials)
+    return Configuration(server=host, credentials=credentials)
 
 
 class ExchangeAdapter(MailPort):
@@ -40,27 +77,32 @@ class ExchangeAdapter(MailPort):
         password_env_var: str = "EWS_PASSWORD",
         password_file: str = "",
         outlook_folder: str = "",
-        save_dir: str = "C:\\ioc\\outlook_attachments"
+        save_dir: str = "C:\\ioc\\outlook_attachments",
+        ews_port: int = 443,
+        verify_ssl: bool = True,
     ):
         """
         Инициализация почтового адаптера.
         """
         self.email = email
         self.username = username or email
-        self.server = _normalize_ews_server(server)
+        self.server, port_in_host = _normalize_ews_server(server)
+        self.ews_port = port_in_host or int(ews_port or 443)
+        self.verify_ssl = verify_ssl
         self.password_env_var = password_env_var
         self.password_file = password_file
         self.outlook_folder = outlook_folder
         self.save_dir = save_dir
+        _configure_ssl_verification(self.verify_ssl)
 
     def _get_account(self) -> Account:
         """Инициализирует и возвращает объект Account из exchangelib."""
         password = resolve_secret(self.password_file, self.password_env_var)
 
         credentials = Credentials(username=self.username, password=password)
-        
+
         if self.server:
-            config = Configuration(server=self.server, credentials=credentials)
+            config = _build_configuration(self.server, self.ews_port, credentials)
             return Account(
                 primary_smtp_address=self.email,
                 config=config,

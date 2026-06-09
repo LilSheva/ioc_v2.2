@@ -51,7 +51,9 @@ def main():
         password_env_var=config.get("password_env_var", "EWS_PASSWORD"),
         password_file=config.get("password_file", ""),
         outlook_folder=config.get("outlook_folder", ""),
-        save_dir=config.get("save_dir", "C:\\ioc\\outlook_attachments")
+        save_dir=config.get("save_dir", "C:\\ioc\\outlook_attachments"),
+        ews_port=config.get("ews_port", 443),
+        verify_ssl=config.get("ews_verify_ssl", True),
     )
 
     export_adapter = LocalFSAdapter(
