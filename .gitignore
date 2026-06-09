@@ -4,3 +4,11 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
+
+# Локальная разработка — не для рабочего хоста
+tests/
+docs/
+AGENTS.md
+PLAN_PHASE3.md
+FUTURE_TASKS.md
+tmp_refactoring.md
