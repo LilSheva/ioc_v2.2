@@ -1,4 +1,4 @@
-﻿__pycache__/
+__pycache__/
 *.py[cod]
 .pytest_cache/
 *.egg-info/
@@ -6,7 +6,7 @@
 venv/
 *.zip
 
-# Local dev only
+# Не публикуется на рабочий хост (ветка test-future-main)
 tests/
 docs/
 AGENTS.md
