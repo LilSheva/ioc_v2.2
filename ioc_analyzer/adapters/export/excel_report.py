@@ -8,6 +8,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from ioc_analyzer.core.constants import DEFAULT_FSTEC_EVENT_TYPE
 from ioc_analyzer.core.models import ReportData
+from ioc_analyzer.core.report_naming import bulletin_column_value
 from ioc_analyzer.core.parser.cleaner import smart_clean_uri
 
 
@@ -56,6 +57,10 @@ def generate_xlsx_report(
         for ioc in report_data.indicators:
             ioc_by_type.setdefault(ioc.ioc_type, []).append(ioc)
 
+        if not report_data.indicators:
+            wb.save(output_path)
+            return True
+
         for cfg in ioc_config:
             if not cfg.get('enabled', False):
                 continue
@@ -77,11 +82,14 @@ def generate_xlsx_report(
                         ioc_display = uri_smart_map[ioc.clean_value]
 
                     row_mode = ioc.parser_mode or report_data.parser_mode
+                    file_bulletin = bulletin_column_value(
+                        row_mode,
+                        ioc.source_file or report_data.source_filename,
+                        report_data.fstek_bulletin,
+                    )
                     if row_mode == "gossopka":
-                        file_bulletin = f"GosSOPKA {ioc.source_file}" if ioc.source_file else report_data.source_filename
                         file_event_type = ioc.context or ""
                     else:
-                        file_bulletin = report_data.source_filename
                         file_event_type = ioc.context or DEFAULT_FSTEC_EVENT_TYPE
 
                     row_data = [

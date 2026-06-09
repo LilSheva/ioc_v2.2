@@ -25,6 +25,9 @@ class ExportPort(abc.ABC):
         report_data: ReportData,
         report_dir: str,
         templates_dir: str | None = None,
+        report_path: str | None = None,
+        filters_path: str | None = None,
+        cve_path: str | None = None,
     ) -> None:
         """
         Генерирует Excel в report_dir и CSV в templates_dir (или report_dir).

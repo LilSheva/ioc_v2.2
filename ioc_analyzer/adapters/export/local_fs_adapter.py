@@ -7,10 +7,14 @@ import logging
 import os
 import shutil
 import time
-from datetime import datetime
 
 from ioc_analyzer.core.mailbox_types import MailboxLayout
 from ioc_analyzer.core.models import ReportData
+from ioc_analyzer.core.report_naming import (
+    filters_report_filename,
+    ioc_report_filename,
+    vulnerabilities_report_filename,
+)
 from ioc_analyzer.ports.export_port import ExportPort
 from ioc_analyzer.adapters.export.excel_report import generate_xlsx_report, generate_cve_xlsx_report
 from ioc_analyzer.adapters.export.excel_filters import generate_filters_xlsx
@@ -67,7 +71,6 @@ class LocalFSAdapter(ExportPort):
         return layout
 
     def setup_directories(self, bulletin_num: str) -> str:
-        """Совместимость: одна папка без подструктуры (GUI)."""
         safe_num = bulletin_num.replace("/", "-").replace("\\", "-").replace(":", "_")
         bulletin_dir = os.path.join(self.share_path, safe_num)
         os.makedirs(bulletin_dir, exist_ok=True)
@@ -85,35 +88,53 @@ class LocalFSAdapter(ExportPort):
         report_data: ReportData,
         report_dir: str,
         templates_dir: str | None = None,
+        report_path: str | None = None,
+        filters_path: str | None = None,
+        cve_path: str | None = None,
     ) -> None:
-        current_time = datetime.now().strftime("%d.%m.%Y %H-%M")
-        bulletin_name = os.path.splitext(report_data.source_filename)[0].replace("/", "-")
+        os.makedirs(report_dir, exist_ok=True)
         csv_dir = templates_dir or report_dir
+        os.makedirs(csv_dir, exist_ok=True)
 
-        report_path = os.path.join(report_dir, f"Отчет ({bulletin_name}) {current_time}.xlsx")
-        generate_xlsx_report(
-            report_data=report_data,
-            output_path=report_path,
-            ioc_config=self.ioc_config,
-            uri_clean_mode=self.uri_clean_mode,
-        )
+        mode = report_data.parser_mode
+        source = report_data.source_filename
+        bulletin = report_data.fstek_bulletin
+        has_iocs = bool(report_data.indicators)
+        has_bdu = bool(report_data.bdu_list)
 
-        filters_path = os.path.join(report_dir, f"Фильтры ({bulletin_name}) {current_time}.xlsx")
-        generate_filters_xlsx(
-            report_data=report_data,
-            output_path=filters_path,
-            ioc_config=self.ioc_config,
-        )
+        if has_iocs:
+            report_file = report_path or os.path.join(
+                report_dir,
+                ioc_report_filename(mode, source, bulletin),
+            )
+            generate_xlsx_report(
+                report_data=report_data,
+                output_path=report_file,
+                ioc_config=self.ioc_config,
+                uri_clean_mode=self.uri_clean_mode,
+            )
 
-        bdu_list = getattr(report_data, "bdu_list", [])
-        if bdu_list:
-            cve_path = os.path.join(report_dir, f"CVE ({bulletin_name}) {current_time}.xlsx")
-            generate_cve_xlsx_report(bdu_list, cve_path)
+            filters_file = filters_path or os.path.join(
+                report_dir,
+                filters_report_filename(mode, source, bulletin),
+            )
+            generate_filters_xlsx(
+                report_data=report_data,
+                output_path=filters_file,
+                ioc_config=self.ioc_config,
+            )
 
-        generate_csv_for_sasha(
-            report_data=report_data,
-            output_dir=csv_dir,
-            k_value=None,
-            delimiter=";",
-            use_bom=True,
-        )
+            generate_csv_for_sasha(
+                report_data=report_data,
+                output_dir=csv_dir,
+                k_value=None,
+                delimiter=";",
+                use_bom=True,
+            )
+
+        if has_bdu:
+            cve_file = cve_path or os.path.join(
+                report_dir,
+                vulnerabilities_report_filename(mode, source, bulletin),
+            )
+            generate_cve_xlsx_report(report_data.bdu_list, cve_file)

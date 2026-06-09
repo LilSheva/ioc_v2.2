@@ -15,6 +15,11 @@ from ioc_analyzer.adapters.ip_block.mock_ip_block import MockIpBlockAdapter
 from ioc_analyzer.adapters.gui.tkinter_gui import MainView
 
 from ioc_analyzer.core.constants import DEFAULT_FSTEC_EVENT_TYPE
+from ioc_analyzer.core.report_naming import (
+    filters_report_filename,
+    ioc_report_filename,
+    vulnerabilities_report_filename,
+)
 from ioc_analyzer.core.config_manager import ConfigManager
 from ioc_analyzer.core.service import AppService
 from ioc_analyzer.core.query_builder import generate_query_data, build_query
@@ -33,6 +38,7 @@ class GuiController:
         self.last_bdu_data: list[Tuple[str, str]] = []
         self._last_unblock_data: dict[str, list[IOC]] = {}
         self._last_query_data: list[dict[str, Any]] = []
+        self._last_output_path: str = ""
 
         self.bulletin = ""
         self.mode = "fstek"
@@ -85,26 +91,27 @@ class GuiController:
                 return f"FSTEC {m.group(1)}/{m.group(2)}/{m.group(3)}"
         return None
 
+    def _report_source_filename(self) -> str:
+        files = self.get_selected_files()
+        return os.path.basename(files[0]) if files else "bulletin.docx"
+
+    def _fstek_bulletin_value(self) -> str:
+        return self.bulletin or self.auto_fill_bulletin() or ""
+
     def generate_report_filename(self) -> str:
-        t = datetime.now().strftime('%d.%m.%Y %H-%M')
-        if self.mode == "fstek":
-            b = (self.bulletin or self.auto_fill_bulletin() or "Без бюллетеня").replace('/', '-')
-            return f"Отчет ({b}) {t}.xlsx"
-        return f"Отчет (ГосСОПКА) {t}.xlsx"
+        return ioc_report_filename(
+            self.mode, self._report_source_filename(), self._fstek_bulletin_value()
+        )
 
     def generate_filters_filename(self) -> str:
-        t = datetime.now().strftime('%d.%m.%Y %H-%M')
-        if self.mode == "fstek":
-            b = (self.bulletin or self.auto_fill_bulletin() or "Без бюллетеня").replace('/', '-')
-            return f"Фильтры ({b}) {t}.xlsx"
-        return f"Фильтры (ГосСОПКА) {t}.xlsx"
+        return filters_report_filename(
+            self.mode, self._report_source_filename(), self._fstek_bulletin_value()
+        )
 
     def generate_cve_filename(self) -> str:
-        t = datetime.now().strftime('%d.%m.%Y %H-%M')
-        if self.mode == "fstek":
-            b = (self.bulletin or self.auto_fill_bulletin() or "Без бюллетеня").replace('/', '-')
-            return f"CVE ({b}) {t}.xlsx"
-        return f"CVE (ГосСОПКА) {t}.xlsx"
+        return vulnerabilities_report_filename(
+            self.mode, self._report_source_filename(), self._fstek_bulletin_value()
+        )
 
     def process_files(self, log_callback=None) -> Tuple[bool, Optional[dict]]:
         # Запускает локальный парсинг через AppService без выгрузки на шару
@@ -155,23 +162,47 @@ class GuiController:
             return False, None
 
     def generate_reports(self, ioc_data: dict, output_path: str, log_callback=None) -> Tuple[bool, None]:
-        # Координируем генерацию отчетов в локальную папку
         try:
+            ioc_data = ioc_data or {}
             flat_iocs = []
             for iocs in ioc_data.values():
                 flat_iocs.extend(iocs)
 
-            main_filename = os.path.basename(self.selected_files[0])
+            main_filename = self._report_source_filename()
+            fstek_bulletin = self._fstek_bulletin_value()
             report_data = ReportData(
-                source_filename=main_filename, parser_mode=self.mode,
-                parsed_at=datetime.now(), indicators=flat_iocs,
-                bdu_list=[b for b, _ in self.last_bdu_data]
+                source_filename=main_filename,
+                parser_mode=self.mode,
+                parsed_at=datetime.now(),
+                indicators=flat_iocs,
+                bdu_list=[b for b, _ in self.last_bdu_data],
+                fstek_bulletin=fstek_bulletin,
             )
 
-            # Передаем конфигурацию в локальный FS адаптер
             self.service.exporter.ioc_config = self.get_config_data()
-            dest_dir = os.path.dirname(output_path)
-            self.service.exporter.export_report(report_data, dest_dir)
+            dest_dir = os.path.dirname(output_path) or "."
+            has_iocs = bool(flat_iocs)
+            has_bdu = bool(report_data.bdu_list)
+
+            report_path = output_path if has_iocs else None
+            filters_path = (
+                os.path.join(dest_dir, self.generate_filters_filename()) if has_iocs else None
+            )
+            cve_path = None
+            if has_bdu:
+                cve_path = (
+                    output_path if not has_iocs
+                    else os.path.join(dest_dir, self.generate_cve_filename())
+                )
+
+            self.service.exporter.export_report(
+                report_data,
+                dest_dir,
+                report_path=report_path,
+                filters_path=filters_path,
+                cve_path=cve_path,
+            )
+            self._last_output_path = output_path if has_iocs else (cve_path or output_path)
             
             # Заполняем query data
             self._last_query_data = generate_query_data(flat_iocs, self.get_config_data(), self.uri_clean_mode)

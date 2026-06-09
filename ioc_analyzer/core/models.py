@@ -51,6 +51,7 @@ class ReportData:
     parsed_at: datetime = field(default_factory=datetime.now)
     indicators: list[IOC] = field(default_factory=list)
     bdu_list: list[str] = field(default_factory=list)
+    fstek_bulletin: str = ""  # ручной номер бюллетеня (GUI)
 
 
 @dataclass

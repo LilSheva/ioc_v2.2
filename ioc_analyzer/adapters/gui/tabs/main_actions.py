@@ -32,18 +32,25 @@ def run_generation_flow(tab_obj) -> None:
 
     success, ioc_data = tab_obj.controller.process_files(log_callback=tab_obj.log)
 
-    if not success or not ioc_data:
+    if not success:
         tab_obj.log("\nОбработка завершилась с ошибкой.")
-        messagebox.showerror("Ошибка", "Не удалось извлечь IOC из файлов.")
+        messagebox.showerror("Ошибка", "Не удалось обработать файлы.")
         return
 
+    ioc_data = ioc_data or {}
+    bdu_data = tab_obj.controller.last_bdu_data
     total_iocs = sum(len(iocs) for iocs in ioc_data.values())
-    if total_iocs == 0:
-        tab_obj.log("\nВ документах не найдено ни одного IOC.")
-        messagebox.showinfo("Информация", "В выбранных документах не найдено ни одного IOC.")
+
+    if total_iocs == 0 and not bdu_data:
+        tab_obj.log("\nВ документах не найдено ни IOC, ни BDU.")
+        messagebox.showinfo("Информация", "В выбранных документах не найдено ни IOC, ни BDU.")
         return
 
-    default_filename = tab_obj.controller.generate_report_filename()
+    if total_iocs == 0 and bdu_data:
+        tab_obj.log(f"\nIOC не найдено. Будет создан отчёт по BDU ({len(bdu_data)} шт.).")
+        default_filename = tab_obj.controller.generate_cve_filename()
+    else:
+        default_filename = tab_obj.controller.generate_report_filename()
 
     output_path = filedialog.asksaveasfilename(
         title="Сохранить отчет как...",
@@ -117,13 +124,14 @@ def run_generation_flow(tab_obj) -> None:
 
         result = messagebox.askyesno("Успех", "\n".join(message_parts))
         if result:
+            open_path = getattr(tab_obj.controller, "_last_output_path", None) or output_path
+            open_path = os.path.normpath(open_path)
             try:
-                os.startfile(output_path)
-            except Exception:
-                import subprocess
-                try:
-                    subprocess.run(['xdg-open', output_path])
-                except Exception:
-                    tab_obj.log("Не удалось автоматически открыть файл.")
+                if os.path.isfile(open_path):
+                    os.startfile(open_path)
+                else:
+                    tab_obj.log(f"Файл не найден: {open_path}")
+            except OSError:
+                tab_obj.log("Не удалось автоматически открыть файл.")
     else:
         messagebox.showerror("Ошибка", "Произошла ошибка при генерации отчетов.")

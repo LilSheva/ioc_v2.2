@@ -17,6 +17,16 @@ from ioc_analyzer.ports.mail_port import MailPort
 logger = logging.getLogger("ioc_analyzer.mail_adapter")
 
 
+def _normalize_ews_server(server: str) -> str:
+    """Убирает схему https:// — exchangelib ожидает только hostname."""
+    host = (server or "").strip()
+    if host.lower().startswith("https://"):
+        host = host[8:]
+    elif host.lower().startswith("http://"):
+        host = host[7:]
+    return host.strip("/")
+
+
 class ExchangeAdapter(MailPort):
     """
     Реализация MailPort для работы с MS Exchange через EWS.
@@ -37,7 +47,7 @@ class ExchangeAdapter(MailPort):
         """
         self.email = email
         self.username = username or email
-        self.server = server
+        self.server = _normalize_ews_server(server)
         self.password_env_var = password_env_var
         self.password_file = password_file
         self.outlook_folder = outlook_folder
