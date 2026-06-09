@@ -1,0 +1,214 @@
+"""
+Сервис координации бизнес-логики (Оркестратор).
+"""
+
+import logging
+import os
+from datetime import datetime
+from typing import Any, Callable, Optional, Tuple
+
+from ioc_analyzer.core.models import IOC, ReportData
+from ioc_analyzer.core.parser import IOCParser
+from ioc_analyzer.ports.document_port import DocumentPort
+from ioc_analyzer.ports.mail_port import MailPort
+from ioc_analyzer.ports.export_port import ExportPort
+from ioc_analyzer.ports.ip_block_port import IpBlockPort
+
+logger = logging.getLogger("ioc_analyzer.service")
+
+
+class AppService:
+    """
+    Класс сервиса для запуска процессов обработки бюллетеней.
+    """
+
+    def __init__(
+        self,
+        doc_reader: DocumentPort,
+        mail_reader: MailPort,
+        exporter: ExportPort,
+        ip_block_client: IpBlockPort,
+        settings: dict[str, Any]
+    ):
+        """
+        Инициализация сервиса с внедрением зависимостей портов.
+        """
+        self.doc_reader = doc_reader
+        self.mail_reader = mail_reader
+        self.exporter = exporter
+        self.ip_block_client = ip_block_client
+        self.settings = settings
+
+    def _extract_bulletin_number(self, filename: str) -> Optional[str]:
+        """Пытается определить номер бюллетеня ФСТЭК из имени файла."""
+        import re
+        pattern = r'\b(\d+)\s+(\d+)\s+(\d+)\b'
+        match = re.search(pattern, filename)
+        if match:
+            return f"FSTEC {match.group(1)}/{match.group(2)}/{match.group(3)}"
+        return None
+
+    def process_local_files(
+        self,
+        file_paths: list[str],
+        dest_dir: str,
+        mode: str = "fstek",
+        uri_clean_mode: str = "domain",
+        event_type: str = "Фишинговая рассылка",
+        log_callback: Optional[Callable[[str], None]] = None
+    ) -> Tuple[bool, dict[str, list[IOC]], list[Tuple[str, str]]]:
+        """
+        Выполняет ручную обработку локальных документов и сохраняет результаты.
+
+        Returns:
+            Кортеж (успех, словарь_найденных_IOC_по_типам, список_найденных_BDU)
+        """
+        def log(msg: str):
+            logger.info(msg)
+            if log_callback:
+                log_callback(msg)
+
+        log(f"Starting processing of {len(file_paths)} files in mode '{mode}'")
+        parser = IOCParser(
+            self.settings.get("ioc_config", []),
+            mode=mode,
+            document_reader=self.doc_reader
+        )
+
+        # Парсим IOC
+        raw_parsed = parser.parse(file_paths)
+        
+        # Преобразуем во внутренние модели IOC
+        ioc_by_type: dict[str, list[IOC]] = {}
+        unblock_count = 0
+        
+        for ioc_type, items in raw_parsed.items():
+            ioc_by_type[ioc_type] = []
+            for original, cleaned, meta in items:
+                status = meta.get("status", "block")
+                if status == "unblock" and mode == "gossopka":
+                    unblock_count += 1
+                    log(f"   🔓 [РАЗБЛОКИРОВКА] {cleaned} (файл: {meta['filename']})")
+                    continue
+                
+                ioc = IOC(
+                    ioc_type=ioc_type,
+                    raw_value=original,
+                    clean_value=cleaned,
+                    status=status,
+                    context=meta.get("event_type", event_type),
+                    source_file=meta.get("filename", ""),
+                    line_number=None
+                )
+                ioc_by_type[ioc_type].append(ioc)
+
+        # Дедупликация в пределах типа
+        for ioc_type in ioc_by_type:
+            seen = set()
+            deduped = []
+            for ioc in ioc_by_type[ioc_type]:
+                if ioc.clean_value not in seen:
+                    seen.add(ioc.clean_value)
+                    deduped.append(ioc)
+            ioc_by_type[ioc_type] = deduped
+
+        # Поиск BDU
+        bdu_list = parser.extract_bdu_identifiers(file_paths)
+        
+        # Подготовка данных для экспорта
+        flat_iocs = []
+        for iocs in ioc_by_type.values():
+            flat_iocs.extend(iocs)
+
+        main_filename = os.path.basename(file_paths[0]) if file_paths else "bulletin.docx"
+        report_data = ReportData(
+            source_filename=main_filename,
+            parser_mode=mode,
+            parsed_at=datetime.now(),
+            indicators=flat_iocs,
+            bdu_list=[b for b, _ in bdu_list]
+        )
+
+        # Экспорт отчетов
+        log(f"Exporting reports to {dest_dir}...")
+        self.exporter.export_report(report_data, dest_dir)
+        log("Report generation finished.")
+
+        ip_comments = {
+            ioc.clean_value: ioc.context or ioc.source_file
+            for ioc in flat_iocs
+            if ioc.ioc_type == "IP"
+        }
+        if ip_comments:
+            log(f"Sending {len(ip_comments)} IP addresses to block API...")
+            ok, _ = self.ip_block_client.block_ips(ip_comments)
+            if ok:
+                log("✓ IP block API request completed.")
+            else:
+                log("⚠ IP block API request failed.")
+
+        return True, ioc_by_type, bdu_list
+
+    def process_mailbox(self, log_callback: Optional[Callable[[str], None]] = None) -> int:
+        """
+        Скачивает новые бюллетени по почте, обрабатывает их и сохраняет на сетевую шару.
+        
+        Returns:
+            Количество успешно обработанных писем с бюллетенями.
+        """
+        def log(msg: str):
+            logger.info(msg)
+            if log_callback:
+                log_callback(msg)
+
+        log("Checking Exchange mailbox for new bulletins...")
+        emails = self.mail_reader.fetch_unread_emails()
+        if not emails:
+            log("No new unread messages.")
+            return 0
+
+        log(f"Found {len(emails)} unread emails.")
+        processed_count = 0
+
+        for email in emails:
+            log(f"Processing email: '{email.subject}' received at {email.received_time}")
+            docx_attachments = [a for a in email.attachments if a.lower().endswith('.docx')]
+            
+            if not docx_attachments:
+                log("⚠ No .docx bulletins found in email attachments. Skipping.")
+                self.mail_reader.mark_as_read(email.mail_id)
+                continue
+
+            # Пытаемся получить номер бюллетеня из первого вложения
+            first_docx = docx_attachments[0]
+            bulletin_num = self._extract_bulletin_number(os.path.basename(first_docx))
+            if not bulletin_num:
+                bulletin_num = f"MAIL_{email.received_time.strftime('%Y%m%d_%H%M%S')}"
+
+            # Создаем структуру директорий на сетевом ресурсе
+            dest_dir = self.exporter.setup_directories(bulletin_num)
+            
+            # Копируем вложения в целевую папку
+            copied_files = []
+            for docx_path in docx_attachments:
+                new_path = self.exporter.copy_bulletin_file(docx_path, dest_dir)
+                copied_files.append(new_path)
+
+            # Запускаем парсинг и сохранение отчетов
+            success, _, _ = self.process_local_files(
+                file_paths=copied_files,
+                dest_dir=dest_dir,
+                mode=self.settings.get("mode", "fstek"),
+                uri_clean_mode=self.settings.get("uri_clean_mode", "domain"),
+                event_type=self.settings.get("event_type", "Фишинговая рассылка"),
+                log_callback=log_callback
+            )
+
+            if success:
+                self.mail_reader.mark_as_read(email.mail_id)
+                processed_count += 1
+                log(f"✓ Mail item '{email.subject}' successfully parsed and exported to network share.")
+            else:
+                log(f"❌ Failed to parse or export mail item '{email.subject}'.")
+
+        return processed_count
