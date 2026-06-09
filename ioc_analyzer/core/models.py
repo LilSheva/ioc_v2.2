@@ -18,6 +18,7 @@ class IOC:
     status: str = "block"  # block, search, unblock
     context: str = ""  # Текстовое окружение индикатора (для отчетов)
     source_file: str = ""  # Имя файла, из которого извлечен индикатор
+    parser_mode: str = ""  # fstek / gossopka (при автоопределении на сервере)
     def __iter__(self) -> Any:
         meta = {
             "filename": self.source_file,
@@ -65,6 +66,7 @@ class AppSettings:
     preserve_existing_files: bool = True
     verbose: bool = True
     password_env_var: str = "EWS_PASSWORD"
+    password_file: str = ""  # путь к файлу с паролем; "-" = не использовать
     ews_email: str = ""
     ews_server: str = ""
     ews_username: str = ""

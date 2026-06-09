@@ -42,13 +42,20 @@ class LocalFSAdapter(ExportPort):
     Адаптер выгрузки отчетов на сетевую шару / локальный диск.
     """
 
-    def __init__(self, share_path: str, preserve_files: bool = True, ioc_config: list[dict] = None):
+    def __init__(
+        self,
+        share_path: str,
+        preserve_files: bool = True,
+        ioc_config: list[dict] | None = None,
+        uri_clean_mode: str = "domain",
+    ):
         """
         Инициализация файлового адаптера.
         """
         self.share_path = share_path
         self.preserve_files = preserve_files
         self.ioc_config = ioc_config or []
+        self.uri_clean_mode = uri_clean_mode
 
     def setup_directories(self, bulletin_num: str) -> str:
         """
@@ -86,8 +93,7 @@ class LocalFSAdapter(ExportPort):
             report_data=report_data,
             output_path=report_path,
             ioc_config=self.ioc_config,
-            uri_clean_mode="domain",
-            event_type="Фишинговая рассылка"
+            uri_clean_mode=self.uri_clean_mode,
         )
 
         # 2. Файл фильтров

@@ -49,15 +49,16 @@ def main():
         username=config.get("ews_username", ""),
         server=config.get("ews_server", ""),
         password_env_var=config.get("password_env_var", "EWS_PASSWORD"),
+        password_file=config.get("password_file", ""),
         outlook_folder=config.get("outlook_folder", ""),
         save_dir=config.get("save_dir", "C:\\ioc\\outlook_attachments")
     )
 
-    # Сетевой ресурс выгрузки
     export_adapter = LocalFSAdapter(
         share_path=config.get("network_share_path", "C:\\ioc\\network_share"),
         preserve_files=config.get("preserve_existing_files", True),
-        ioc_config=config.get("ioc_config", [])
+        ioc_config=config.get("ioc_config", []),
+        uri_clean_mode=config.get("uri_clean_mode", "domain"),
     )
 
     api_url = (config.get("api_url") or "").strip()

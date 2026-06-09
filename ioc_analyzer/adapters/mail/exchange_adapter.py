@@ -10,6 +10,7 @@ from datetime import datetime
 
 
 from exchangelib import Account, Configuration, Credentials, DELEGATE, FileAttachment
+from ioc_analyzer.core.credentials import resolve_secret
 from ioc_analyzer.core.models import EmailRecord
 from ioc_analyzer.ports.mail_port import MailPort
 
@@ -27,6 +28,7 @@ class ExchangeAdapter(MailPort):
         username: str = "",
         server: str = "",
         password_env_var: str = "EWS_PASSWORD",
+        password_file: str = "",
         outlook_folder: str = "",
         save_dir: str = "C:\\ioc\\outlook_attachments"
     ):
@@ -37,14 +39,13 @@ class ExchangeAdapter(MailPort):
         self.username = username or email
         self.server = server
         self.password_env_var = password_env_var
+        self.password_file = password_file
         self.outlook_folder = outlook_folder
         self.save_dir = save_dir
 
     def _get_account(self) -> Account:
         """Инициализирует и возвращает объект Account из exchangelib."""
-        password = os.environ.get(self.password_env_var, "")
-        if not password:
-            logger.warning(f"Переменная окружения '{self.password_env_var}' для пароля EWS пуста.")
+        password = resolve_secret(self.password_file, self.password_env_var)
 
         credentials = Credentials(username=self.username, password=password)
         

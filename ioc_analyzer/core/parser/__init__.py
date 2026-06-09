@@ -6,10 +6,12 @@ import re
 from typing import Any, Tuple
 from ioc_analyzer.core.parser.base_parser import BaseIOCParser
 from ioc_analyzer.core.parser.cleaner import clean_ioc
+from ioc_analyzer.core.constants import PARSER_MODE_AUTO
 from ioc_analyzer.core.parser.gossopka_parser import (
     extract_sections_from_paragraphs,
     determine_sequential_statuses
 )
+from ioc_analyzer.core.parser.mode_detect import detect_parser_mode
 from ioc_analyzer.ports.document_port import DocumentPort, ParagraphData
 
 
@@ -99,26 +101,36 @@ class IOCParser(BaseIOCParser):
             filename = file_path.split('/')[-1].split('\\')[-1]
             metadata = self.extract_metadata_from_paragraphs(paragraphs, filename)
 
-            if self.mode == "gossopka":
-                sections = extract_sections_from_paragraphs(paragraphs)
-                for section_text in sections:
-                    file_ioc_results = self.find_all_raw_matches_with_spans(section_text)
-                    statuses = determine_sequential_statuses(section_text, file_ioc_results)
-                    
-                    for ioc_type, original, cleaned, status in statuses:
-                        meta = metadata.copy()
-                        meta["status"] = status
-                        ioc_results[ioc_type].append((original, cleaned, meta))
-            else:
-                # Режим fstek
-                text = self.document_reader.read_full_text(file_path)
-                file_ioc_results = self.find_all_raw_matches_with_spans(text)
-                for ioc_type, ioc_list in file_ioc_results.items():
-                    if ioc_type in ioc_results:
-                        for original, cleaned, start, end in ioc_list:
+            effective_mode = self.mode
+            if self.mode == PARSER_MODE_AUTO:
+                effective_mode = detect_parser_mode(filename, paragraphs)
+
+            saved_mode = self.mode
+            self.mode = effective_mode
+            metadata["parser_mode"] = effective_mode
+
+            try:
+                if effective_mode == "gossopka":
+                    sections = extract_sections_from_paragraphs(paragraphs)
+                    for section_text in sections:
+                        file_ioc_results = self.find_all_raw_matches_with_spans(section_text)
+                        statuses = determine_sequential_statuses(section_text, file_ioc_results)
+
+                        for ioc_type, original, cleaned, status in statuses:
                             meta = metadata.copy()
-                            meta["status"] = "block"
+                            meta["status"] = status
                             ioc_results[ioc_type].append((original, cleaned, meta))
+                else:
+                    text = self.document_reader.read_full_text(file_path)
+                    file_ioc_results = self.find_all_raw_matches_with_spans(text)
+                    for ioc_type, ioc_list in file_ioc_results.items():
+                        if ioc_type in ioc_results:
+                            for original, cleaned, start, end in ioc_list:
+                                meta = metadata.copy()
+                                meta["status"] = "block"
+                                ioc_results[ioc_type].append((original, cleaned, meta))
+            finally:
+                self.mode = saved_mode
 
         return ioc_results
 

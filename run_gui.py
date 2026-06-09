@@ -14,6 +14,7 @@ from ioc_analyzer.adapters.ip_block.api_adapter import IpBlockApiAdapter
 from ioc_analyzer.adapters.ip_block.mock_ip_block import MockIpBlockAdapter
 from ioc_analyzer.adapters.gui.tkinter_gui import MainView
 
+from ioc_analyzer.core.constants import DEFAULT_FSTEC_EVENT_TYPE
 from ioc_analyzer.core.config_manager import ConfigManager
 from ioc_analyzer.core.service import AppService
 from ioc_analyzer.core.query_builder import generate_query_data, build_query
@@ -36,7 +37,6 @@ class GuiController:
         self.bulletin = ""
         self.mode = "fstek"
         self.uri_clean_mode = "domain"
-        self.event_type = "Фишинговая рассылка"
 
     def get_state_file_path(self) -> str:
         return self.config_manager.config_path
@@ -125,10 +125,15 @@ class GuiController:
                 ioc_data[ioc_type] = []
                 unblocked[ioc_type] = []
                 for orig, clean, meta in items:
+                    file_mode = meta.get("parser_mode", self.mode)
+                    if file_mode == "gossopka":
+                        context = meta.get("event_type") or ""
+                    else:
+                        context = meta.get("event_type") or DEFAULT_FSTEC_EVENT_TYPE
                     ioc_obj = IOC(
                         ioc_type=ioc_type, raw_value=orig, clean_value=clean,
-                        status=meta.get("status", "block"), context=meta.get("event_type", self.event_type),
-                        source_file=meta.get("filename", "")
+                        status=meta.get("status", "block"), context=context,
+                        source_file=meta.get("filename", ""), parser_mode=file_mode,
                     )
                     if meta.get("status") == "unblock" and self.mode == "gossopka":
                         unblocked[ioc_type].append(ioc_obj)
@@ -254,13 +259,15 @@ def main():
         username=config.get("ews_username", ""),
         server=config.get("ews_server", ""),
         password_env_var=config.get("password_env_var", "EWS_PASSWORD"),
+        password_file=config.get("password_file", ""),
         outlook_folder=config.get("outlook_folder", ""),
         save_dir=config.get("save_dir", "C:\\ioc\\outlook_attachments")
     )
     export_adapter = LocalFSAdapter(
         share_path=config.get("network_share_path", "C:\\ioc\\network_share"),
         preserve_files=config.get("preserve_existing_files", True),
-        ioc_config=config.get("ioc_config", [])
+        ioc_config=config.get("ioc_config", []),
+        uri_clean_mode=config.get("uri_clean_mode", "domain"),
     )
     
     api_url = (config.get("api_url") or "").strip()

@@ -7,6 +7,7 @@ import os
 from datetime import datetime
 from typing import Any, Callable, Optional, Tuple
 
+from ioc_analyzer.core.constants import DEFAULT_FSTEC_EVENT_TYPE, PARSER_MODE_AUTO
 from ioc_analyzer.core.models import IOC, ReportData
 from ioc_analyzer.core.parser import IOCParser
 from ioc_analyzer.ports.document_port import DocumentPort
@@ -52,9 +53,8 @@ class AppService:
         self,
         file_paths: list[str],
         dest_dir: str,
-        mode: str = "fstek",
+        mode: str = PARSER_MODE_AUTO,
         uri_clean_mode: str = "domain",
-        event_type: str = "Фишинговая рассылка",
         log_callback: Optional[Callable[[str], None]] = None
     ) -> Tuple[bool, dict[str, list[IOC]], list[Tuple[str, str]]]:
         """
@@ -86,18 +86,25 @@ class AppService:
             ioc_by_type[ioc_type] = []
             for original, cleaned, meta in items:
                 status = meta.get("status", "block")
-                if status == "unblock" and mode == "gossopka":
+                file_mode = meta.get("parser_mode", mode)
+                if status == "unblock" and file_mode == "gossopka":
                     unblock_count += 1
                     log(f"   🔓 [РАЗБЛОКИРОВКА] {cleaned} (файл: {meta['filename']})")
                     continue
-                
+
+                if file_mode == "gossopka":
+                    context = meta.get("event_type") or ""
+                else:
+                    context = meta.get("event_type") or DEFAULT_FSTEC_EVENT_TYPE
+
                 ioc = IOC(
                     ioc_type=ioc_type,
                     raw_value=original,
                     clean_value=cleaned,
                     status=status,
-                    context=meta.get("event_type", event_type),
+                    context=context,
                     source_file=meta.get("filename", ""),
+                    parser_mode=file_mode,
                     line_number=None
                 )
                 ioc_by_type[ioc_type].append(ioc)
@@ -121,15 +128,23 @@ class AppService:
             flat_iocs.extend(iocs)
 
         main_filename = os.path.basename(file_paths[0]) if file_paths else "bulletin.docx"
+        report_mode = mode
+        if mode == PARSER_MODE_AUTO and flat_iocs:
+            report_mode = flat_iocs[0].parser_mode or "fstek"
+        elif mode == PARSER_MODE_AUTO:
+            report_mode = "fstek"
+
         report_data = ReportData(
             source_filename=main_filename,
-            parser_mode=mode,
+            parser_mode=report_mode,
             parsed_at=datetime.now(),
             indicators=flat_iocs,
             bdu_list=[b for b, _ in bdu_list]
         )
 
-        # Экспорт отчетов
+        if hasattr(self.exporter, "uri_clean_mode"):
+            self.exporter.uri_clean_mode = uri_clean_mode
+
         log(f"Exporting reports to {dest_dir}...")
         self.exporter.export_report(report_data, dest_dir)
         log("Report generation finished.")
@@ -198,9 +213,7 @@ class AppService:
             success, _, _ = self.process_local_files(
                 file_paths=copied_files,
                 dest_dir=dest_dir,
-                mode=self.settings.get("mode", "fstek"),
                 uri_clean_mode=self.settings.get("uri_clean_mode", "domain"),
-                event_type=self.settings.get("event_type", "Фишинговая рассылка"),
                 log_callback=log_callback
             )
 

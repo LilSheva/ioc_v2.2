@@ -6,6 +6,7 @@ import re
 from datetime import datetime
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from ioc_analyzer.core.constants import DEFAULT_FSTEC_EVENT_TYPE
 from ioc_analyzer.core.models import ReportData
 from ioc_analyzer.core.parser.cleaner import smart_clean_uri
 
@@ -15,7 +16,6 @@ def generate_xlsx_report(
     output_path: str,
     ioc_config: list[dict],
     uri_clean_mode: str = "domain",
-    event_type: str = "Фишинговая рассылка"
 ) -> bool:
     """
     Генерирует форматированный .xlsx отчет с 10 столбцами.
@@ -76,12 +76,13 @@ def generate_xlsx_report(
                     if name == 'URI' and ioc.clean_value in uri_smart_map:
                         ioc_display = uri_smart_map[ioc.clean_value]
 
-                    if report_data.parser_mode == "gossopka":
+                    row_mode = ioc.parser_mode or report_data.parser_mode
+                    if row_mode == "gossopka":
                         file_bulletin = f"GosSOPKA {ioc.source_file}" if ioc.source_file else report_data.source_filename
-                        file_event_type = ioc.context or event_type
+                        file_event_type = ioc.context or ""
                     else:
                         file_bulletin = report_data.source_filename
-                        file_event_type = event_type
+                        file_event_type = ioc.context or DEFAULT_FSTEC_EVENT_TYPE
 
                     row_data = [
                         counter, today_date, nta_status, siem_tools_status,
