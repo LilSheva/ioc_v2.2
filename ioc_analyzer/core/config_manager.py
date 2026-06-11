@@ -4,15 +4,16 @@
 
 import copy
 import json
+import logging
 import os
 from typing import Any
 
+logger = logging.getLogger("ioc_analyzer.config_manager")
 
 DEFAULT_IOC_CONFIG = [
     {
         "enabled": True,
         "name": "IP",
-        "regex": "(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(?:\\[\\.\\]|\\.)){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)",
         "report_type": "IP-адрес",
         "nta_status": "",
         "siem_tools_status": "---------------",
@@ -25,7 +26,6 @@ DEFAULT_IOC_CONFIG = [
     {
         "enabled": True,
         "name": "DNS",
-        "regex": "(?:[a-zA-Z0-9](?:[a-zA-Z0-9\\-]{0,61}[a-zA-Z0-9])?(?:\\[\\.\\]|\\.)){1,}[a-zA-Z]{2,}",
         "report_type": "Домен",
         "nta_status": "",
         "siem_tools_status": "---------------",
@@ -44,7 +44,6 @@ DEFAULT_IOC_CONFIG = [
     {
         "enabled": True,
         "name": "URI",
-        "regex": "(?:\\[:\\]|:)//[^\\s<>\\\"]+",
         "report_type": "URI",
         "nta_status": "",
         "siem_tools_status": "---------------",
@@ -57,7 +56,6 @@ DEFAULT_IOC_CONFIG = [
     {
         "enabled": True,
         "name": "File",
-        "regex": "(?:\\«)([^\\«\\»]+?)(?:\\»)",
         "report_type": "File",
         "nta_status": "",
         "siem_tools_status": "---------------",
@@ -70,7 +68,6 @@ DEFAULT_IOC_CONFIG = [
     {
         "enabled": True,
         "name": "Email",
-        "regex": "\\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}\\b",
         "report_type": "Email",
         "nta_status": "",
         "siem_tools_status": "---------------",
@@ -83,7 +80,6 @@ DEFAULT_IOC_CONFIG = [
     {
         "enabled": True,
         "name": "SHA256",
-        "regex": "\\b[a-fA-F0-9]{64}\\b",
         "report_type": "SHA256",
         "nta_status": "---------------",
         "siem_tools_status": "---------------",
@@ -96,7 +92,6 @@ DEFAULT_IOC_CONFIG = [
     {
         "enabled": True,
         "name": "MD5",
-        "regex": "\\b[a-fA-F0-9]{32}\\b",
         "report_type": "MD5",
         "nta_status": "",
         "siem_tools_status": "---------------",
@@ -109,7 +104,6 @@ DEFAULT_IOC_CONFIG = [
     {
         "enabled": True,
         "name": "SHA1",
-        "regex": "\\b[a-fA-F0-9]{40}\\b",
         "report_type": "SHA1",
         "nta_status": "---------------",
         "siem_tools_status": "---------------",
@@ -122,7 +116,6 @@ DEFAULT_IOC_CONFIG = [
     {
         "enabled": True,
         "name": "Registry",
-        "regex": "(?:HKEY_[A-Z_]+|HKLM|HKCU|HKCR|HKU|HKCC)(?:\\\\[^\\s\\\\]+)+?(?=[\\s,;.!?)\\]'\\\"`]|$)",
         "report_type": "Registry",
         "nta_status": "",
         "siem_tools_status": "---------------",
@@ -149,7 +142,8 @@ class ConfigManager:
             try:
                 with open(self.config_path, "r", encoding="utf-8") as f:
                     self.config_data = json.load(f)
-            except Exception:
+            except (json.JSONDecodeError, OSError) as e:
+                logger.error("Ошибка при чтении файла конфигурации %s: %s", self.config_path, e)
                 self.config_data = {}
         
         if "ioc_config" not in self.config_data:
@@ -161,7 +155,8 @@ class ConfigManager:
             with open(self.config_path, "w", encoding="utf-8") as f:
                 json.dump(self.config_data, f, indent=4, ensure_ascii=False)
             return True
-        except:
+        except OSError as e:
+            logger.error("Ошибка при записи файла конфигурации %s: %s", self.config_path, e)
             return False
 
     def get_ioc_config(self) -> list[dict[str, Any]]:
@@ -172,7 +167,7 @@ class ConfigManager:
         return self.save()
 
     def reset_single(self, index: int) -> bool:
-        """Сбрасывает конфигурацию конкретного IOC к дефолтной."""
+        """Сбросить конфигурацию конкретного IOC к дефолтной."""
         ioc_config = self.get_ioc_config()
         if not (0 <= index < len(ioc_config)):
             return False
@@ -185,7 +180,7 @@ class ConfigManager:
         return False
 
     def reset_all(self) -> bool:
-        """Сбрасывает всю конфигурацию IOC к дефолтной."""
+        """Сбросить всю конфигурацию IOC к дефолтной."""
         self.config_data["ioc_config"] = copy.deepcopy(DEFAULT_IOC_CONFIG)
         return self.save()
 

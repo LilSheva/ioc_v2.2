@@ -111,8 +111,11 @@ def rebuild_group_queries(tab_obj, group_idx) -> None:
             val = chunk_var.get()
             if 1 <= val <= ioc_count:
                 chunk_size = val
-        except:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger("ioc_analyzer.gui.results_sections").debug(
+                "Не удалось прочитать размер чанка, используется размер по умолчанию: %s", e
+            )
 
     # Разделение по чанкам
     if chunk_size >= ioc_count:

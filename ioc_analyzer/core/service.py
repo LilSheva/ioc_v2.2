@@ -3,16 +3,13 @@
 """
 
 import logging
-import os
 from datetime import datetime
 from typing import Any, Callable, Optional, Tuple
 
 from ioc_analyzer.core.constants import DEFAULT_FSTEC_EVENT_TYPE, PARSER_MODE_AUTO
-from ioc_analyzer.core.folder_naming import build_mailbox_folder_name
-from ioc_analyzer.core.mailbox_layout import collect_docx_text_bundle, copy_attachments_to_task
 from ioc_analyzer.core.models import IOC, ReportData
 from ioc_analyzer.core.parser import IOCParser
-from ioc_analyzer.core.parser.mode_detect import detect_mailbox_parser_mode
+from ioc_analyzer.core.parser.cleaner import deduplicate_iocs
 from ioc_analyzer.ports.document_port import DocumentPort
 from ioc_analyzer.ports.mail_port import MailPort
 from ioc_analyzer.ports.export_port import ExportPort
@@ -100,19 +97,12 @@ class AppService:
                     context=context,
                     source_file=meta.get("filename", ""),
                     parser_mode=file_mode,
-                    line_number=None
                 )
                 ioc_by_type[ioc_type].append(ioc)
 
-        # Дедупликация в пределах типа
+        # Дедупликация в пределах типа по ключу (clean_value, status, source_file)
         for ioc_type in ioc_by_type:
-            seen = set()
-            deduped = []
-            for ioc in ioc_by_type[ioc_type]:
-                if ioc.clean_value not in seen:
-                    seen.add(ioc.clean_value)
-                    deduped.append(ioc)
-            ioc_by_type[ioc_type] = deduped
+            ioc_by_type[ioc_type] = deduplicate_iocs(ioc_by_type[ioc_type])
 
         # Поиск BDU
         bdu_list = parser.extract_bdu_identifiers(file_paths)
@@ -122,7 +112,10 @@ class AppService:
         for iocs in ioc_by_type.values():
             flat_iocs.extend(iocs)
 
-        main_filename = os.path.basename(file_paths[0]) if file_paths else "bulletin.docx"
+        from ioc_analyzer.core.report_naming import pick_bulletin_source_filename
+
+        ioc_sources = [ioc.source_file for iocs in ioc_by_type.values() for ioc in iocs]
+        main_filename = pick_bulletin_source_filename(file_paths, mode, ioc_sources)
         report_mode = mode
         if mode == PARSER_MODE_AUTO and flat_iocs:
             report_mode = flat_iocs[0].parser_mode or "fstek"
@@ -149,13 +142,21 @@ class AppService:
             for ip, fname in unblock_ips:
                 log(f"      • {ip} (из файла {fname})")
 
+        # Унификация комментариев блокировки IP под legacy-правила
+        from ioc_analyzer.core.report_naming import bulletin_column_value
         ip_comments: dict[str, str] = {}
         for ioc in flat_iocs:
             if ioc.ioc_type != "IP":
                 continue
             if report_mode == "gossopka" and ioc.status != "block":
                 continue
-            ip_comments[ioc.clean_value] = ioc.context or ioc.source_file
+            
+            desc = bulletin_column_value(
+                report_mode,
+                ioc.source_file or main_filename,
+                self.settings.get("fstek_bulletin", "")
+            )
+            ip_comments[ioc.clean_value] = desc
 
         if ip_comments:
             log(f"Sending {len(ip_comments)} IP addresses to block API...")
@@ -170,89 +171,7 @@ class AppService:
     def process_mailbox(self, log_callback: Optional[Callable[[str], None]] = None) -> int:
         """
         Скачивает новые бюллетени по почте, обрабатывает их и сохраняет на сетевую шару.
-        
-        Returns:
-            Количество успешно обработанных писем с бюллетенями.
         """
-        def log(msg: str):
-            logger.info(msg)
-            if log_callback:
-                log_callback(msg)
-
-        log("Checking Exchange mailbox for new bulletins...")
-        emails = self.mail_reader.fetch_unread_emails()
-        if not emails:
-            log("No new unread messages.")
-            return 0
-
-        log(f"Found {len(emails)} unread emails.")
-        processed_count = 0
-
-        share_path = (self.settings.get("network_share_path") or "").strip()
-        if not share_path:
-            log("❌ В config.json не задан network_share_path.")
-            return 0
-        os.makedirs(share_path, exist_ok=True)
-
-        for email in emails:
-            log(f"Processing email: '{email.subject}' received at {email.received_time}")
-
-            if not email.attachments:
-                log("⚠ Письмо без вложений. Пропуск без пометки прочитанным.")
-                continue
-
-            mode, mode_error = detect_mailbox_parser_mode(
-                email.attachments, self.doc_reader
-            )
-            if mode_error or not mode:
-                log(f"❌ {mode_error}")
-                continue
-
-            log(f"   Режим парсинга для письма: {mode}")
-
-            docx_sources = [a for a in email.attachments if a.lower().endswith(".docx")]
-            if not docx_sources:
-                log("⚠ Нет .docx для парсинга. Пропуск без пометки прочитанным.")
-                continue
-
-            doc_text, metadata_num = collect_docx_text_bundle(
-                docx_sources,
-                self.doc_reader,
-                self.settings.get("ioc_config", []),
-            )
-            first_docx_name = os.path.basename(docx_sources[0])
-            folder_name = build_mailbox_folder_name(
-                mode,
-                received_time=email.received_time,
-                doc_text=doc_text,
-                first_docx_name=first_docx_name,
-                metadata_num=metadata_num,
-            )
-
-            layout = self.exporter.setup_mailbox_layout(folder_name)
-            log(f"   📁 {layout.root}")
-
-            docx_in_task = copy_attachments_to_task(
-                email.attachments, email.temp_dir, layout.task
-            )
-            if not docx_in_task:
-                log("❌ Не удалось подготовить .docx в «Задача».")
-                continue
-
-            success, _, _ = self.process_local_files(
-                file_paths=docx_in_task,
-                dest_dir=layout.report,
-                mode=mode,
-                uri_clean_mode=self.settings.get("uri_clean_mode", "domain"),
-                templates_dir=layout.templates,
-                log_callback=log_callback,
-            )
-
-            if success:
-                self.mail_reader.mark_as_read(email.mail_id)
-                processed_count += 1
-                log(f"✓ Письмо '{email.subject}' обработано.")
-            else:
-                log(f"❌ Ошибка обработки письма '{email.subject}'.")
-
-        return processed_count
+        from ioc_analyzer.core.mailbox_processor import MailboxProcessor
+        processor = MailboxProcessor(self)
+        return processor.process_mailbox(log_callback)

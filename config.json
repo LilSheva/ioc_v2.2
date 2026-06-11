@@ -4,6 +4,7 @@
     "network_share_path": "C:\\ioc\\network_share",
     "uri_clean_mode": "domain",
     "preserve_existing_files": true,
+    "save_msg_file": false,
 
     "password_file": "-",
     "password_env_var": "EWS_PASSWORD",
@@ -20,7 +21,6 @@
         {
             "enabled": true,
             "name": "IP",
-            "regex": "(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(?:\\[\\.\\]|\\.)){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)",
             "report_type": "IP-адрес",
             "nta_status": "",
             "siem_tools_status": "---------------",
@@ -40,7 +40,6 @@
         {
             "enabled": true,
             "name": "DNS",
-            "regex": "(?:[a-zA-Z0-9](?:[a-zA-Z0-9\\-]{0,61}[a-zA-Z0-9])?(?:\\[\\.\\]|\\.)){1,}[a-zA-Z]{2,}",
             "report_type": "Домен",
             "nta_status": "",
             "siem_tools_status": "---------------",
@@ -63,7 +62,6 @@
         {
             "enabled": true,
             "name": "URI",
-            "regex": "(?:\\[:\\]|:)//[^\\s<>\\\"]+",
             "report_type": "URI",
             "nta_status": "",
             "siem_tools_status": "---------------",
@@ -76,7 +74,6 @@
         {
             "enabled": true,
             "name": "File",
-            "regex": "(?:\\«)([^\\«\\»]+?)(?:\\»)",
             "report_type": "File",
             "nta_status": "",
             "siem_tools_status": "---------------",
@@ -101,7 +98,6 @@
         {
             "enabled": true,
             "name": "Email",
-            "regex": "\\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}\\b",
             "report_type": "Email",
             "nta_status": "",
             "siem_tools_status": "---------------",
@@ -120,7 +116,6 @@
         {
             "enabled": true,
             "name": "SHA256",
-            "regex": "\\b[a-fA-F0-9]{64}\\b",
             "report_type": "SHA256",
             "nta_status": "---------------",
             "siem_tools_status": "---------------",
@@ -135,7 +130,6 @@
         {
             "enabled": true,
             "name": "MD5",
-            "regex": "\\b[a-fA-F0-9]{32}\\b",
             "report_type": "MD5",
             "nta_status": "",
             "siem_tools_status": "---------------",
@@ -150,7 +144,6 @@
         {
             "enabled": true,
             "name": "SHA1",
-            "regex": "\\b[a-fA-F0-9]{40}\\b",
             "report_type": "SHA1",
             "nta_status": "---------------",
             "siem_tools_status": "---------------",
@@ -165,7 +158,6 @@
         {
             "enabled": true,
             "name": "Registry",
-            "regex": "(?:HKEY_[A-Z_]+|HKLM|HKCU|HKCR|HKU|HKCC)(?:\\\\[^\\s\\\\]+)+?(?=[\\s,;.!?)\\]'\\\"`]|$)",
             "report_type": "Registry",
             "nta_status": "",
             "siem_tools_status": "---------------",

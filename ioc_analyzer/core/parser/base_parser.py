@@ -21,6 +21,15 @@ class BaseIOCParser:
         self.mode = mode
         self.file_blacklist: list[str] = []
         self.filename_exclusions: list[str] = []
+        
+        self.hardcoded_regexes = {
+            'IP': r'(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(?:\[\.\]|\.)){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)',
+            'SHA256': r'\b[a-fA-F0-9]{64}\b',
+            'MD5': r'\b[a-fA-F0-9]{32}\b',
+            'SHA1': r'\b[a-fA-F0-9]{40}\b',
+            'Registry': r'(?:HKEY_[A-Z_]+|HKLM|HKCU|HKCR|HKU|HKCC)(?:\\[^\s\\]+)+?(?=[\s,;.!?)\\]\'"``]|$)',
+        }
+        
         for ioc in self.ioc_config:
             if ioc['name'] == 'File':
                 self.file_blacklist = ioc.get('file_blacklist', [])
@@ -153,7 +162,8 @@ class BaseIOCParser:
         ip_pairs: list[Tuple[str, str, int, int]] = []
         for ioc in self.ioc_config:
             if ioc['name'] == 'IP' and ioc.get('enabled', False):
-                pairs, working_text = self._extract_with_finditer(working_text, ioc['regex'], 'IP')
+                pattern = self.hardcoded_regexes['IP']
+                pairs, working_text = self._extract_with_finditer(working_text, pattern, 'IP')
                 ip_pairs.extend(pairs)
                 break
         raw_matches['IP'] = ip_pairs
@@ -211,7 +221,8 @@ class BaseIOCParser:
         for name in hash_order:
             for ioc in self.ioc_config:
                 if ioc['name'] == name and ioc.get('enabled', False):
-                    pairs, working_text = self._extract_with_finditer(working_text, ioc['regex'], name)
+                    pattern = self.hardcoded_regexes[name]
+                    pairs, working_text = self._extract_with_finditer(working_text, pattern, name)
                     raw_matches.setdefault(name, [])
                     existing_spans = {(x[2], x[3]) for x in raw_matches[name]}
                     for original, cleaned, start, end in pairs:

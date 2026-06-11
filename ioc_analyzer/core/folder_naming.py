@@ -6,8 +6,11 @@ import re
 from datetime import datetime
 from typing import Optional
 
+from ioc_analyzer.core.report_naming import normalize_date_dd_mm_yyyy, parse_gossopka_filename
+
 _FSTEC_NUM_PATTERN = re.compile(r"240[\s/-]*93[\s/-]*\d+")
 _DATE_PATTERN = re.compile(r"\b(\d{2}\.\d{2}\.\d{4})\b")
+_DATE_SHORT_PATTERN = re.compile(r"\b(\d{2}\.\d{2}\.\d{2})\b")
 _INVALID_PATH_CHARS = re.compile(r'[\\/*?:"<>|]')
 
 _MONTHS_RU = {
@@ -32,9 +35,15 @@ def format_received_date_ru(dt: datetime) -> str:
 
 def extract_date_from_doc(doc_text: str, filename: str) -> str:
     """Дата дд.мм.гггг из имени файла или текста документа."""
+    parsed = parse_gossopka_filename(filename)
+    if parsed:
+        return parsed[0]
     match = _DATE_PATTERN.search(filename)
     if match:
         return match.group(1)
+    short = _DATE_SHORT_PATTERN.search(filename)
+    if short:
+        return normalize_date_dd_mm_yyyy(short.group(1))
     match = _DATE_PATTERN.search(doc_text)
     if match:
         return match.group(1)

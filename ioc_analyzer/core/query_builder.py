@@ -2,10 +2,13 @@
 Модуль для построения SIEM/NAD-запросов по шаблонам.
 """
 
+import logging
 import re
 from typing import Any
 from ioc_analyzer.core.parser.cleaner import is_ip_address, smart_clean_uri
 from ioc_analyzer.core.models import IOC
+
+logger = logging.getLogger("ioc_analyzer.query_builder")
 
 
 def build_query(template: str, ioc_values: list[str], join_op: str) -> str:
@@ -52,7 +55,8 @@ def generate_query_data(
                     else 'http://' + ioc.clean_value
                 )
                 domain = parsed.netloc or parsed.path.split('/')[0]
-            except:
+            except Exception as e:
+                logger.warning("Ошибка разбора URI в построении запросов: %s", e)
                 domain = ioc.clean_value
 
             if is_ip_address(domain):

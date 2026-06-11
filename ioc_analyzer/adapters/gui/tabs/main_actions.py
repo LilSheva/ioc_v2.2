@@ -3,7 +3,7 @@
 """
 
 import os
-from tkinter import filedialog, messagebox, END, NORMAL, DISABLED
+from tkinter import filedialog, messagebox
 import ttkbootstrap as ttk
 
 
@@ -46,56 +46,49 @@ def run_generation_flow(tab_obj) -> None:
         messagebox.showinfo("Информация", "В выбранных документах не найдено ни IOC, ни BDU.")
         return
 
-    if total_iocs == 0 and bdu_data:
-        tab_obj.log(f"\nIOC не найдено. Будет создан отчёт по BDU ({len(bdu_data)} шт.).")
-        default_filename = tab_obj.controller.generate_cve_filename()
-    else:
-        default_filename = tab_obj.controller.generate_report_filename()
-
-    output_path = filedialog.asksaveasfilename(
-        title="Сохранить отчет как...",
-        defaultextension=".xlsx",
-        filetypes=[("Excel Files", "*.xlsx"), ("All Files", "*.*")],
-        initialfile=default_filename
+    parent_dir = filedialog.askdirectory(
+        title="Выберите папку — внутри будет создана структура бюллетеня (Задача / Отчет / Шаблоны IOC)"
     )
 
-    if not output_path:
+    if not parent_dir:
         tab_obj.log("\nСохранение отменено пользователем.")
         return
 
-    success, _ = tab_obj.controller.generate_reports(
-        ioc_data, output_path, log_callback=tab_obj.log
+    success, layout = tab_obj.controller.generate_reports_mailbox(
+        ioc_data, parent_dir, log_callback=tab_obj.log
     )
 
-    filter_filename = tab_obj.controller.generate_filters_filename()
-    filters_path = os.path.join(os.path.dirname(output_path), filter_filename)
-
-    if success:
+    if success and layout:
         tab_obj.log("\n" + "=" * 70)
         tab_obj.log("ОБРАБОТКА ЗАВЕРШЕНА УСПЕШНО")
         tab_obj.log("=" * 70 + "\n")
 
+        report_files = []
+        if os.path.isdir(layout.report):
+            report_files = sorted(
+                f for f in os.listdir(layout.report)
+                if f.lower().endswith(".xlsx")
+            )
+
         message_parts = [
-            "Отчёты успешно созданы!",
+            "Структура папок создана:",
             "",
-            f"  • {os.path.basename(output_path)}"
+            f"  {layout.root}",
+            "",
+            "Отчёты:",
         ]
-        if filters_path and os.path.exists(filters_path):
-            message_parts.append(f"  • {os.path.basename(filters_path)}")
+        for name in report_files:
+            message_parts.append(f"  • {name}")
 
-        bdu_data = tab_obj.controller.last_bdu_data
-        if bdu_data:
-            base_name = os.path.splitext(output_path)[0]
-            # Отчет CVE генерируется как Excel-файл (с префиксом CVE) в той же папке
-            cve_filename = tab_obj.controller.generate_cve_filename()
-            cve_path = os.path.join(os.path.dirname(output_path), cve_filename)
-            if os.path.exists(cve_path):
-                message_parts.append(f"  • {cve_filename} ({len(bdu_data)} BDU-идентификаторов)")
+        csv_dir = layout.templates
+        if os.path.isdir(csv_dir):
+            csv_files = [f for f in os.listdir(csv_dir) if f.lower().endswith(".csv")]
+            for name in sorted(csv_files):
+                message_parts.append(f"  • Шаблоны IOC/{name}")
 
-        # Подсчет IP для вывода информации
         ip_block_count = 0
         if ioc_data:
-            ip_list = ioc_data.get('IP', [])
+            ip_list = ioc_data.get("IP", [])
             for ioc in ip_list:
                 if mode == "fstek" or ioc.status == "block":
                     ip_block_count += 1
@@ -103,7 +96,7 @@ def run_generation_flow(tab_obj) -> None:
         unblock_data = tab_obj.controller.get_last_unblock_data()
         ip_unblock_count = 0
         if mode == "gossopka" and unblock_data:
-            ip_unblock_count = len(unblock_data.get('IP', []))
+            ip_unblock_count = len(unblock_data.get("IP", []))
 
         if ip_block_count > 0 or ip_unblock_count > 0:
             message_parts.append("")
@@ -120,18 +113,14 @@ def run_generation_flow(tab_obj) -> None:
             )
 
         message_parts.append("")
-        message_parts.append("Открыть .xlsx отчёт?")
+        message_parts.append("Открыть папку с результатами?")
 
         result = messagebox.askyesno("Успех", "\n".join(message_parts))
         if result:
-            open_path = getattr(tab_obj.controller, "_last_output_path", None) or output_path
-            open_path = os.path.normpath(open_path)
+            open_dir = os.path.normpath(layout.root)
             try:
-                if os.path.isfile(open_path):
-                    os.startfile(open_path)
-                else:
-                    tab_obj.log(f"Файл не найден: {open_path}")
+                os.startfile(open_dir)
             except OSError:
-                tab_obj.log("Не удалось автоматически открыть файл.")
+                tab_obj.log("Не удалось автоматически открыть папку.")
     else:
         messagebox.showerror("Ошибка", "Произошла ошибка при генерации отчетов.")

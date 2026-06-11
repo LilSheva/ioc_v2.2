@@ -2,6 +2,7 @@
 Адаптер для генерации Excel-файла фильтров поисковых запросов.
 """
 
+import logging
 from urllib.parse import urlparse
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
@@ -10,6 +11,8 @@ from openpyxl.utils import get_column_letter
 from ioc_analyzer.core.models import ReportData
 from ioc_analyzer.core.parser.cleaner import is_ip_address
 from ioc_analyzer.core.query_builder import build_query
+
+logger = logging.getLogger("ioc_analyzer.excel_filters")
 
 
 def generate_filters_xlsx(
@@ -48,7 +51,7 @@ def generate_filters_xlsx(
                     filter_value = domain
                     if is_ip_address(filter_value):
                         target_sheet = 'IP-адрес'
-                except:
+                except Exception:
                     filter_value = ioc.clean_value
 
             if target_sheet:
@@ -149,5 +152,5 @@ def generate_filters_xlsx(
         wb.save(output_path)
         return True
     except Exception as e:
-        print(f"Ошибка при генерации фильтров: {e}")
+        logger.error("Ошибка при генерации фильтров: %s", e, exc_info=True)
         return False

@@ -2,6 +2,7 @@
 Адаптер для генерации отчетов Excel (openpyxl).
 """
 
+import logging
 import re
 from datetime import datetime
 from openpyxl import Workbook
@@ -10,6 +11,8 @@ from ioc_analyzer.core.constants import DEFAULT_FSTEC_EVENT_TYPE
 from ioc_analyzer.core.models import ReportData
 from ioc_analyzer.core.report_naming import bulletin_column_value
 from ioc_analyzer.core.parser.cleaner import smart_clean_uri
+
+logger = logging.getLogger("ioc_analyzer.excel_report")
 
 
 def generate_xlsx_report(
@@ -136,7 +139,7 @@ def generate_xlsx_report(
         wb.save(output_path)
         return True
     except Exception as e:
-        print(f"Ошибка при генерации xlsx отчета: {e}")
+        logger.error("Ошибка при генерации xlsx отчета: %s", e, exc_info=True)
         return False
 
 
@@ -204,5 +207,5 @@ def generate_cve_xlsx_report(bdu_list: list[str], output_path: str) -> bool:
         wb.save(output_path)
         return True
     except Exception as e:
-        print(f"Ошибка при создании CVE xlsx: {e}")
+        logger.error("Ошибка при создании CVE xlsx: %s", e, exc_info=True)
         return False

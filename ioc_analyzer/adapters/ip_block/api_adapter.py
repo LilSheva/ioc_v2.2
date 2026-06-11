@@ -62,38 +62,58 @@ def send_to_api(
 ) -> tuple[bool, dict[str, dict[str, str]]]:
     """
     Отправляет IP-адреса в API сайта блокировок с per-IP комментариями.
+    Разбивает на пачки по 100 IP для предотвращения таймаутов.
     """
     if not ip_comments:
         return True, {}
 
-    ip_list = list(ip_comments.keys())
-    payload = [{"ip": ip, "comment": comment} for ip, comment in ip_comments.items()]
-
-    try:
-        response = requests.post(
-            api_url,
-            json=payload,
-            headers={"X-API-KEY": api_key},
-            timeout=30,
+    if api_url.lower().startswith("http://"):
+        logger.warning(
+            "БЕЗОПАСНОСТЬ: Использование HTTP протокола (%s) для отправки API-запросов небезопасно. "
+            "Рекомендуется переключиться на HTTPS в production.",
+            api_url
         )
-        response.raise_for_status()
-        results = response.json()
-    except requests.ConnectionError:
-        return False, {
-            ip: {"status": "NETWORK_ERROR", "text": "Ошибка соединения"} for ip in ip_list
-        }
-    except requests.Timeout:
-        return False, {ip: {"status": "TIMEOUT", "text": "Таймаут"} for ip in ip_list}
-    except requests.HTTPError as e:
-        code = getattr(getattr(e, "response", None), "status_code", "?")
-        return False, {ip: {"status": "HTTP_ERROR", "text": f"HTTP {code}"} for ip in ip_list}
-    except Exception as e:
-        return False, {
-            ip: {"status": "UNEXPECTED", "text": f"Ошибка: {e.__class__.__name__}"}
-            for ip in ip_list
-        }
 
-    return True, _build_per_ip(ip_list, results)
+    items = list(ip_comments.items())
+    chunk_size = 100
+    all_ok = True
+    combined_by_ip = {}
+
+    for i in range(0, len(items), chunk_size):
+        chunk = dict(items[i:i + chunk_size])
+        ip_list = list(chunk.keys())
+        payload = [{"ip": ip, "comment": comment} for ip, comment in chunk.items()]
+
+        try:
+            response = requests.post(
+                api_url,
+                json=payload,
+                headers={"X-API-KEY": api_key},
+                timeout=30,
+            )
+            response.raise_for_status()
+            results = response.json()
+            ok_chunk, per_ip_chunk = True, _build_per_ip(ip_list, results)
+        except requests.ConnectionError:
+            ok_chunk, per_ip_chunk = False, {
+                ip: {"status": "NETWORK_ERROR", "text": "Ошибка соединения"} for ip in ip_list
+            }
+        except requests.Timeout:
+            ok_chunk, per_ip_chunk = False, {ip: {"status": "TIMEOUT", "text": "Таймаут"} for ip in ip_list}
+        except requests.HTTPError as e:
+            code = getattr(getattr(e, "response", None), "status_code", "?")
+            ok_chunk, per_ip_chunk = False, {ip: {"status": "HTTP_ERROR", "text": f"HTTP {code}"} for ip in ip_list}
+        except Exception as e:
+            ok_chunk, per_ip_chunk = False, {
+                ip: {"status": "UNEXPECTED", "text": f"Ошибка: {e.__class__.__name__}"}
+                for ip in ip_list
+            }
+
+        if not ok_chunk:
+            all_ok = False
+        combined_by_ip.update(per_ip_chunk)
+
+    return all_ok, combined_by_ip
 
 
 class IpBlockApiAdapter(IpBlockPort):

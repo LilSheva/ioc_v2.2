@@ -107,22 +107,24 @@ class LocalFSAdapter(ExportPort):
                 report_dir,
                 ioc_report_filename(mode, source, bulletin),
             )
-            generate_xlsx_report(
+            if not generate_xlsx_report(
                 report_data=report_data,
                 output_path=report_file,
                 ioc_config=self.ioc_config,
                 uri_clean_mode=self.uri_clean_mode,
-            )
+            ):
+                raise OSError(f"Не удалось сохранить отчёт: {report_file}")
 
             filters_file = filters_path or os.path.join(
                 report_dir,
                 filters_report_filename(mode, source, bulletin),
             )
-            generate_filters_xlsx(
+            if not generate_filters_xlsx(
                 report_data=report_data,
                 output_path=filters_file,
                 ioc_config=self.ioc_config,
-            )
+            ):
+                raise OSError(f"Не удалось сохранить фильтры: {filters_file}")
 
             generate_csv_for_sasha(
                 report_data=report_data,

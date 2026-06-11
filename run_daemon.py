@@ -2,6 +2,7 @@
 Фоновый демон автоматической обработки бюллетеней из почты.
 """
 
+import argparse
 import json
 import logging
 import os
@@ -16,18 +17,40 @@ from ioc_analyzer.adapters.ip_block.api_adapter import IpBlockApiAdapter
 from ioc_analyzer.adapters.ip_block.mock_ip_block import MockIpBlockAdapter
 from ioc_analyzer.core.service import AppService
 
-# Настройка логирования в stdout
+# Настройка логирования в stdout и файл app.log
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)]
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler("app.log", mode="a", encoding="utf-8")
+    ]
 )
 logger = logging.getLogger("ioc_analyzer.daemon")
 
 
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="IOC Parser daemon")
+    parser.add_argument(
+        "-tst",
+        action="store_true",
+        help=(
+            "Тестовый режим рабочего хоста: включить расшифровку S/MIME "
+            "через Windows Certificate Store."
+        ),
+    )
+    parser.add_argument(
+        "--config",
+        default="config.json",
+        help="Путь к config.json (по умолчанию: ./config.json)",
+    )
+    return parser.parse_args()
+
+
 def main():
+    args = _parse_args()
     logger.info("Initializing IOC Parser Daemon...")
-    config_path = "config.json"
+    config_path = args.config
     
     if not os.path.exists(config_path):
         logger.error(f"Configuration file {config_path} not found. Exiting.")
@@ -39,6 +62,17 @@ def main():
     except Exception as e:
         logger.error(f"Failed to parse configuration: {e}")
         sys.exit(1)
+
+    if args.tst:
+        logger.warning(
+            "Запуск в режиме -tst: включена расшифровка S/MIME "
+            "через Windows Certificate Store текущего пользователя."
+        )
+    else:
+        logger.info(
+            "Запуск без -tst: S/MIME-расшифровка отключена. "
+            "Зашифрованные письма будут пропущены с ошибкой в логе."
+        )
 
     # Инициализация адаптеров
     doc_adapter = DocxAdapter()
@@ -54,6 +88,7 @@ def main():
         save_dir=config.get("save_dir", "C:\\ioc\\outlook_attachments"),
         ews_port=config.get("ews_port", 443),
         verify_ssl=config.get("ews_verify_ssl", True),
+        enable_smime_test_mode=args.tst,
     )
 
     export_adapter = LocalFSAdapter(

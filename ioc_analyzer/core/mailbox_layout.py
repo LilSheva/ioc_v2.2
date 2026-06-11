@@ -45,6 +45,7 @@ def copy_attachments_to_task(
     attachment_paths: list[str],
     temp_dir: str,
     task_dir: str,
+    preserve_existing_files: bool = True,
 ) -> list[str]:
     """
     Копирует вложения и body.txt в «Задача». Возвращает пути .docx в task_dir.
@@ -55,12 +56,18 @@ def copy_attachments_to_task(
     for src in attachment_paths:
         if os.path.isfile(src):
             dest = os.path.join(task_dir, os.path.basename(src))
-            shutil.copy2(src, dest)
-            if dest.lower().endswith(".docx"):
-                docx_in_task.append(dest)
+            if preserve_existing_files and os.path.exists(dest):
+                if dest.lower().endswith(".docx"):
+                    docx_in_task.append(dest)
+            else:
+                shutil.copy2(src, dest)
+                if dest.lower().endswith(".docx"):
+                    docx_in_task.append(dest)
 
     body_src = os.path.join(temp_dir, "body.txt")
+    dest_body = os.path.join(task_dir, "body.txt")
     if os.path.isfile(body_src):
-        shutil.copy2(body_src, os.path.join(task_dir, "body.txt"))
+        if not (preserve_existing_files and os.path.exists(dest_body)):
+            shutil.copy2(body_src, dest_body)
 
     return docx_in_task

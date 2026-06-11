@@ -114,6 +114,11 @@ class MainTab:
             self._update_file_list()
             self.log(f"Добавлено файлов: {added}")
 
+            detected = self.controller.suggest_mode_from_files(log_callback=self.log)
+            if detected:
+                self.mode_var.set(detected)
+                self._on_mode_changed()
+
             if self.mode_var.get() == "fstek":
                 auto_bulletin = self.controller.auto_fill_bulletin()
                 if auto_bulletin:

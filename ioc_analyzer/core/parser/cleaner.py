@@ -2,6 +2,7 @@
 Модуль для очистки и нормализации индикаторов компрометации (IOC).
 """
 
+import ipaddress
 import re
 import socket
 from typing import Any
@@ -52,9 +53,9 @@ def is_ip_address(value: str) -> bool:
         True, если строка является IP, иначе False.
     """
     try:
-        socket.inet_aton(value)
+        ipaddress.ip_address(value)
         return True
-    except:
+    except ValueError:
         return False
 
 
@@ -88,7 +89,7 @@ def smart_clean_uri(uris: list[Any], uri_clean_mode: str = "domain") -> dict[str
             if not domain:
                 domain = uri
             domain_groups.setdefault(domain, []).append(uri)
-        except:
+        except Exception:
             domain_groups.setdefault(uri, []).append(uri)
 
     cleaned_map: dict[str, str] = {}
@@ -115,7 +116,7 @@ def smart_clean_uri(uris: list[Any], uri_clean_mode: str = "domain") -> dict[str
                     parsed = urlparse(uri if uri.startswith('http') else 'http://' + uri)
                     segments = [s for s in parsed.path.strip('/').split('/') if s]
                     path_segments[uri] = segments
-                except:
+                except Exception:
                     path_segments[uri] = []
 
             for uri in uri_list:
@@ -138,3 +139,24 @@ def smart_clean_uri(uris: list[Any], uri_clean_mode: str = "domain") -> dict[str
                 cleaned_map[uri] = cleaned_val
 
     return cleaned_map
+
+
+def deduplicate_iocs(iocs: list[Any]) -> list[Any]:
+    """
+    Дедуплицирует список IOC, сохраняя уникальные комбинации значения,
+    статуса и источника (файла).
+
+    Args:
+        iocs: Список доменных моделей IOC.
+
+    Returns:
+        Дедуплицированный список IOC.
+    """
+    seen = set()
+    deduped = []
+    for ioc in iocs:
+        key = (ioc.clean_value, ioc.status, ioc.source_file)
+        if key not in seen:
+            seen.add(key)
+            deduped.append(ioc)
+    return deduped

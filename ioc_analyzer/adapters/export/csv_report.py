@@ -3,11 +3,14 @@
 """
 
 import csv
+import logging
 import os
 from typing import Optional
 
 from ioc_analyzer.core.models import ReportData
 from ioc_analyzer.core.report_naming import bulletin_column_value
+
+logger = logging.getLogger("ioc_analyzer.csv_report")
 
 
 def generate_csv_for_sasha(
@@ -68,5 +71,5 @@ def generate_csv_for_sasha(
 
         return True
     except OSError as e:
-        print(f"Ошибка при создании CSV: {e}")
+        logger.error("Ошибка при создании CSV: %s", e, exc_info=True)
         return False
