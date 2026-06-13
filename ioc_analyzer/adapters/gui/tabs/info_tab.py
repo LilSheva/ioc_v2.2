@@ -80,7 +80,7 @@ class InfoTab:
     def _load_instruction(self):
         """Загрузить instruction.md и отрендерить."""
         base = get_application_base_path()
-        path = os.path.join(base, "instruction.md")
+        path = os.path.join(base, ".data", "instruction.md")
 
         if not os.path.isfile(path):
             self.text.configure(state="normal")

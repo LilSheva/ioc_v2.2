@@ -92,15 +92,24 @@ class LocalFSAdapter(ExportPort):
         filters_path: str | None = None,
         cve_path: str | None = None,
     ) -> None:
+        import copy
+        
+        # Фильтруем индикаторы: исключаем только IP-адреса на разблокировку из отчетов и шаблонов
+        report_data_for_export = copy.copy(report_data)
+        report_data_for_export.indicators = [
+            ioc for ioc in report_data.indicators 
+            if not (ioc.ioc_type == "IP" and ioc.status == "unblock")
+        ]
+
         os.makedirs(report_dir, exist_ok=True)
         csv_dir = templates_dir or report_dir
         os.makedirs(csv_dir, exist_ok=True)
 
-        mode = report_data.parser_mode
-        source = report_data.source_filename
-        bulletin = report_data.fstek_bulletin
-        has_iocs = bool(report_data.indicators)
-        has_bdu = bool(report_data.bdu_list)
+        mode = report_data_for_export.parser_mode
+        source = report_data_for_export.source_filename
+        bulletin = report_data_for_export.fstek_bulletin
+        has_iocs = bool(report_data_for_export.indicators)
+        has_bdu = bool(report_data_for_export.bdu_list)
 
         if has_iocs:
             report_file = report_path or os.path.join(
@@ -108,7 +117,7 @@ class LocalFSAdapter(ExportPort):
                 ioc_report_filename(mode, source, bulletin),
             )
             if not generate_xlsx_report(
-                report_data=report_data,
+                report_data=report_data_for_export,
                 output_path=report_file,
                 ioc_config=self.ioc_config,
                 uri_clean_mode=self.uri_clean_mode,
@@ -120,14 +129,14 @@ class LocalFSAdapter(ExportPort):
                 filters_report_filename(mode, source, bulletin),
             )
             if not generate_filters_xlsx(
-                report_data=report_data,
+                report_data=report_data_for_export,
                 output_path=filters_file,
                 ioc_config=self.ioc_config,
             ):
                 raise OSError(f"Не удалось сохранить фильтры: {filters_file}")
 
             generate_csv_for_sasha(
-                report_data=report_data,
+                report_data=report_data_for_export,
                 output_dir=csv_dir,
                 k_value=None,
                 delimiter=";",
@@ -139,4 +148,5 @@ class LocalFSAdapter(ExportPort):
                 report_dir,
                 vulnerabilities_report_filename(mode, source, bulletin),
             )
-            generate_cve_xlsx_report(report_data.bdu_list, cve_file)
+            generate_cve_xlsx_report(report_data_for_export.bdu_list, cve_file)
+

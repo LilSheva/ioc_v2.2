@@ -137,7 +137,6 @@ class SettingsTab:
                 ioc_data = {
                     'enabled': widget_set['enabled_var'].get(),
                     'name': original['name'],
-                    'regex': original['regex'],
                     'report_type': widget_set['report_type'].get(),
                     'nta_status': widget_set['nta_status'].get(),
                     'siem_tools_status': widget_set['siem_tools_status'].get(),
@@ -145,6 +144,9 @@ class SettingsTab:
                     'mp10_templates': mp10_templates,
                     'nad_templates': nad_templates,
                 }
+                if 'regex' in original:
+                    ioc_data['regex'] = original['regex']
+
 
                 if is_file:
                     ioc_data['filename_exclusions'] = self._read_list_entries(widget_set, 'filename_exclusions_entries')

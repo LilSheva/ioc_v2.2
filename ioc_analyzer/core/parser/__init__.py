@@ -112,14 +112,31 @@ class IOCParser(BaseIOCParser):
             try:
                 if effective_mode == "gossopka":
                     sections = extract_sections_from_paragraphs(paragraphs)
+                    
+                    # Детектируем заголовок разблокировки
+                    file_has_unblock_header = False
+                    header_text_parts = []
+                    for p in paragraphs:
+                        if p.has_border:
+                            break
+                        if p.text.strip():
+                            header_text_parts.append(p.text)
+                    header_text = "\n".join(header_text_parts).lower()
+                    if "разблокиров" in header_text:
+                        file_has_unblock_header = True
+
                     for section_text in sections:
                         file_ioc_results = self.find_all_raw_matches_with_spans(section_text)
                         statuses = determine_sequential_statuses(section_text, file_ioc_results)
 
                         for ioc_type, original, cleaned, status in statuses:
-                            meta = metadata.copy()
-                            meta["status"] = status
-                            ioc_results[ioc_type].append((original, cleaned, meta))
+                            if ioc_type in ioc_results:
+                                meta = metadata.copy()
+                                effective_status = status
+                                if file_has_unblock_header:
+                                    effective_status = "unblock"
+                                meta["status"] = effective_status
+                                ioc_results[ioc_type].append((original, cleaned, meta))
                 else:
                     text = self.document_reader.read_full_text(file_path)
                     file_ioc_results = self.find_all_raw_matches_with_spans(text)

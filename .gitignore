@@ -13,3 +13,9 @@ AGENTS.md
 PLAN_PHASE3.md
 FUTURE_TASKS.md
 tmp_refactoring.md
+
+# Локальные данные и конфиги
+.data/
+.test_doc/
+.idea/
+

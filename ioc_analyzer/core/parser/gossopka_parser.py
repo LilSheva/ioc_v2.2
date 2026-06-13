@@ -69,27 +69,26 @@ def determine_sequential_statuses(
         after_context = section_text[end:next_start].lower()
         
         status = None
-        # 1. Проверяем контекст перед индикатором
+        # 1. Проверяем наличие СПЕЦИФИЧЕСКИХ команд разблокировки/блокировки в обоих контекстах
         if 'разблокиров' in before_context or 'разблокира' in before_context or 'легитимный' in before_context:
             status = "unblock"
-        elif 'для поиска и блокировки' in before_context:
+        elif 'разблокиров' in after_context or 'разблокира' in after_context or 'легитимный' in after_context:
+            status = "unblock"
+        elif 'для поиска и блокировки' in before_context or 'для поиска и блокировки' in after_context:
             status = "block"
-        elif 'для поиска' in before_context:
-            status = "search"
-        elif 'блокиров' in before_context:
+        elif 'блокиров' in before_context or 'блок по' in before_context:
+            status = "block"
+        elif 'блокиров' in after_context or 'блок по' in after_context:
             status = "block"
             
-        # 2. Если не найдено, проверяем контекст после индикатора
+        # 2. Если специфические команды не найдены, проверяем общие ключевые слова типа "для поиска"
         if status is None:
-            if 'разблокиров' in after_context or 'разблокира' in after_context or 'легитимный' in after_context:
-                status = "unblock"
-            elif 'для поиска и блокировки' in after_context:
-                status = "block"
+            if 'для поиска' in before_context:
+                status = "search"
             elif 'для поиска' in after_context:
                 status = "search"
-            elif 'блокиров' in after_context:
-                status = "block"
                 
+        # 3. Дефолтное значение
         if status is None:
             status = "block"
             

@@ -10,7 +10,7 @@ from ioc_analyzer.adapters.web.dashboard_template import HTML_TEMPLATE
 app = FastAPI(title="IOC-Analyzer Monitor")
 logger = logging.getLogger("ioc_analyzer.web")
 
-CONFIG_PATH = "config.json"
+CONFIG_PATH = os.path.join(".data", "config.json")
 LOG_FILE_PATH = "app.log"
 
 def get_last_logs(num_lines: int = 100) -> str:

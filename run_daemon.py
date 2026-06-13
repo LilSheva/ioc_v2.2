@@ -41,10 +41,16 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--config",
-        default="config.json",
-        help="Путь к config.json (по умолчанию: ./config.json)",
+        default=os.path.join(".data", "config.json"),
+        help="Путь к config.json (по умолчанию: .data/config.json)",
+    )
+    parser.add_argument(
+        "--loop",
+        action="store_true",
+        help="Запустить демон в циклическом режиме с интервалом ожидания.",
     )
     return parser.parse_args()
+
 
 
 def main():
@@ -114,21 +120,52 @@ def main():
         settings=config
     )
 
-    interval = config.get("daemon_interval_seconds", 300)
-    logger.info(f"Daemon started. Checking mailbox every {interval} seconds. Press Ctrl+C to stop.")
-
-    try:
-        while True:
+    if args.loop:
+        interval = config.get("daemon_interval_seconds", 300)
+        logger.info(f"Daemon started in LOOP mode. Checking mailbox every {interval} seconds. Press Ctrl+C to stop.")
+        try:
+            while True:
+                try:
+                    logger.info("Starting mailbox check cycle...")
+                    processed = app_service.process_mailbox(logger.info)
+                    if processed > 0:
+                        logger.info(f"Successfully processed {processed} email bulletins.")
+                except Exception as e:
+                    logger.error(f"Error during mailbox processing cycle: {e}")
+                time.sleep(interval)
+        except KeyboardInterrupt:
+            logger.info("Daemon stopped by user.")
+    else:
+        logger.info("Запуск демона в режиме выполнения задач по расписанию...")
+        
+        # Определяем список активных задач.
+        # В будущем сюда будут добавлены задачи по выгрузке таблиц в SIEM и проверки систем.
+        tasks = [
+            ("Проверка почты EWS и обработка новых бюллетеней", lambda: app_service.process_mailbox(logger.info))
+        ]
+        
+        has_errors = False
+        for task_name, task_func in tasks:
+            logger.info(f"--- Старт задачи: {task_name} ---")
             try:
-                processed = app_service.process_mailbox(logger.info)
-                if processed > 0:
-                    logger.info(f"Successfully processed {processed} email bulletins.")
+                result = task_func()
+                if task_name == "Проверка почты EWS и обработка новых бюллетеней" and result is not None:
+                    if result > 0:
+                        logger.info(f"Задача '{task_name}' выполнена успешно. Обработано бюллетеней: {result}")
+                    else:
+                        logger.info(f"Задача '{task_name}' завершена. Новых писем не обнаружено.")
+                else:
+                    logger.info(f"Задача '{task_name}' выполнена успешно.")
             except Exception as e:
-                logger.error(f"Error during mailbox processing cycle: {e}")
-            
-            time.sleep(interval)
-    except KeyboardInterrupt:
-        logger.info("Daemon stopped by user.")
+                logger.error(f"Ошибка при выполнении задачи '{task_name}': {e}", exc_info=True)
+                has_errors = True
+                
+        logger.info("Все задачи завершены. Завершение процесса.")
+        if has_errors:
+            sys.exit(1)
+        else:
+            sys.exit(0)
+
 
 
 if __name__ == "__main__":

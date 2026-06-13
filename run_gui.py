@@ -2,6 +2,7 @@
 Графический интерфейс пользователя (GUI) - Точка входа.
 """
 
+import os
 from ioc_analyzer.adapters.document.docx_adapter import DocxAdapter
 from ioc_analyzer.adapters.mail.exchange_adapter import ExchangeAdapter
 from ioc_analyzer.adapters.export.local_fs_adapter import LocalFSAdapter
@@ -14,7 +15,7 @@ from ioc_analyzer.core.service import AppService
 
 
 def main():
-    config_manager = ConfigManager("config.json")
+    config_manager = ConfigManager(os.path.join(".data", "config.json"))
     config = config_manager.config_data
 
     # Сборка DI контейнера
